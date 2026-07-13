@@ -15,6 +15,10 @@
 
 ### Fixes and Maintenance
 
+- Fixed invalid Codex `PreToolUse` output for policy allow matches. Codex accepts
+  `permissionDecision: "allow"` only with `updatedInput`; because this hook does
+  not rewrite tool calls, allow matches now emit no JSON and preserve Codex's
+  normal permission flow. Denials continue to emit the supported deny response.
 - Fixed the executable's compiled-rule path to carry configured protected branches into runtime evaluation. Previously, the CLI loaded the branch list but discarded it when processing input.
 - Fixed the Codex secret-file patch rule to match real multi-line `apply_patch` headers, including nested `.env` and `.secret` paths.
 - Made the decision runner test the Codex profile and locate the repository from the script path instead of Git state. `config_test.sh` now uses the same filesystem-only repository discovery.
@@ -24,9 +28,14 @@
 
 ### Developer Tests and Notes
 
+- Added protocol regression tests proving allow and passthrough policy results
+  produce no hook output while deny results retain valid Codex decision JSON.
+- Added an internal `evaluate` CLI command so the decision-corpus runner can
+  distinguish policy allow from passthrough without emitting invalid hook JSON.
 - The Codex profile passes all 1,265 command-decision fixtures.
 - Rust unit and integration suites pass, including Codex protocol, patch protection, and compiled protected-branch runtime coverage; `cargo clippy --all-targets -- -D warnings` is clean.
-- Direct Codex stdin/stdout smoke checks confirm valid allow and deny JSON and zero-byte passthrough output.
+- Direct Codex stdin/stdout smoke checks confirm zero-byte allow and passthrough
+  output plus valid deny JSON.
 
 ## 2026-06-30
 

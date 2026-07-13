@@ -9,7 +9,8 @@ invocation uses.
 
 ## Major components
 
-- [main.rs](../src/main.rs) defines the `run` and `validate` CLI commands.
+- [main.rs](../src/main.rs) defines the `run` and `validate` CLI commands plus
+  the internal `evaluate` command used by the decision-corpus runner.
 - [hook_io.rs](../src/hook_io.rs) parses lifecycle JSON from standard input
   and serializes hook decisions. It accepts Codex's nullable
   `transcript_path` and ignores forward-compatible input fields.
@@ -37,8 +38,8 @@ invocation uses.
 2. The binary reads one `PreToolUse` JSON object from standard input.
 3. The selected TOML profile is loaded and compiled.
 4. Bash commands are decomposed; deny rules run before allow rules.
-5. A deny or allow match produces hook-specific JSON. No match produces no
-   standard output and leaves the platform's normal permission flow intact.
+5. A deny match produces hook-specific JSON. Allow and passthrough results
+   produce no standard output and leave Codex's normal permission flow intact.
 6. The configured audit files receive the bounded event record.
 
 ## Testing and verification
@@ -48,7 +49,9 @@ invocation uses.
   both root policies.
 - [command_decisions.tsv](../tests/command_decisions.tsv) is the larger
   behavior fixture corpus used by
-  [run_command_decisions.py](../tools/run_command_decisions.py).
+  [run_command_decisions.py](../tools/run_command_decisions.py). The runner uses
+  the internal `evaluate` command because valid hook output cannot distinguish
+  policy allow from passthrough without rewriting the tool input.
 - Python repository checks run with `source source_me.sh && pytest tests/`.
 
 ## Extension points

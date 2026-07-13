@@ -55,7 +55,7 @@ source source_me.sh && python3 tools/run_command_decisions.py
 
 - Input: one `PreToolUse` JSON object on standard input.
 - Policy: the TOML path supplied with `--config`.
-- Standard output: hook-specific JSON for allow or deny; empty for passthrough.
+- Standard output: hook-specific JSON for deny; empty for allow and passthrough.
 - Audit output: JSON Lines at the paths configured under `[audit]`.
 
 ## Known gaps

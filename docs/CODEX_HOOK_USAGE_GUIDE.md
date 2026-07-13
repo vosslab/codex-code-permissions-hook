@@ -20,7 +20,7 @@ The hook returns one of three outcomes:
 | Policy result | Codex behavior |
 | --- | --- |
 | Deny | Emits a Codex `PreToolUse` denial with a reason. |
-| Allow | Emits a Codex `PreToolUse` allow decision. |
+| Allow | Emits no output, preserving Codex's normal permission flow. |
 | Passthrough | Emits no output, preserving Codex's normal permission flow. |
 
 Deny rules take precedence. A compound Bash command is decomposed into simple

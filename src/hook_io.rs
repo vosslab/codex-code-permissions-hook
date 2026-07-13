@@ -5,6 +5,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::io::{self, Read, Write};
 
+use crate::auditing::Decision;
+
 #[derive(Debug, Deserialize)]
 pub struct HookInput {
     pub session_id: String,
@@ -81,13 +83,15 @@ where
 }
 
 impl HookOutput {
-    pub fn allow(reason: String) -> Self {
-        HookOutput {
-            hook_specific_output: HookSpecificOutput {
-                hook_event_name: "PreToolUse".to_string(),
-                permission_decision: "allow".to_string(),
-                permission_decision_reason: reason,
-            },
+    /// Convert an internal policy decision into supported Codex hook output.
+    ///
+    /// Codex accepts `permissionDecision: "allow"` only with `updatedInput`.
+    /// This hook does not rewrite tool inputs, so allow and passthrough results
+    /// produce no output and let Codex continue its normal permission flow.
+    pub fn from_policy_decision(decision: Decision, reason: Option<String>) -> Option<Self> {
+        match decision {
+            Decision::Deny => Some(Self::deny(reason.unwrap_or_default())),
+            Decision::Allow | Decision::Passthrough => None,
         }
     }
 
@@ -136,11 +140,30 @@ mod tests {
     }
 
     #[test]
-    fn test_hook_output_serialization() -> Result<()> {
-        let output = HookOutput::allow("Test reason".to_string());
+    fn test_policy_allow_produces_no_hook_output() {
+        let output = HookOutput::from_policy_decision(
+            Decision::Allow,
+            Some("Allowed by policy".to_string()),
+        );
+
+        assert!(output.is_none());
+    }
+
+    #[test]
+    fn test_policy_passthrough_produces_no_hook_output() {
+        let output = HookOutput::from_policy_decision(Decision::Passthrough, None);
+
+        assert!(output.is_none());
+    }
+
+    #[test]
+    fn test_deny_hook_output_serialization() -> Result<()> {
+        let output =
+            HookOutput::from_policy_decision(Decision::Deny, Some("Test reason".to_string()))
+                .expect("deny decisions should produce hook output");
         let json = serde_json::to_value(&output)?;
 
-        assert_eq!(json["hookSpecificOutput"]["permissionDecision"], "allow");
+        assert_eq!(json["hookSpecificOutput"]["permissionDecision"], "deny");
         assert_eq!(
             json["hookSpecificOutput"]["permissionDecisionReason"],
             "Test reason"

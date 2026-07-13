@@ -34,6 +34,12 @@ enum Commands {
         #[clap(short, long, value_parser)]
         config: PathBuf,
     },
+    /// Evaluate policy for the decision-corpus runner without hook protocol output.
+    #[clap(hide = true)]
+    Evaluate {
+        #[clap(short, long, value_parser)]
+        config: PathBuf,
+    },
 }
 
 fn run_hook(config_path: PathBuf) -> Result<()> {
@@ -67,19 +73,11 @@ fn run_hook(config_path: PathBuf) -> Result<()> {
         audit_passthrough(pt_path, &input);
     }
 
-    // Output decision to stdout (passthrough = no output)
-    match result.decision {
-        Decision::Allow => {
-            let output = HookOutput::allow(result.reason.unwrap_or_default());
-            output.write_to_stdout()?;
-        }
-        Decision::Deny => {
-            let output = HookOutput::deny(result.reason.unwrap_or_default());
-            output.write_to_stdout()?;
-        }
-        Decision::Passthrough => {
-            // No output for passthrough
-        }
+    // A PreToolUse allow response is valid only when it includes updatedInput.
+    // Policy allows do not rewrite input, so they emit nothing and preserve
+    // Codex's normal permission flow.
+    if let Some(output) = HookOutput::from_policy_decision(result.decision, result.reason) {
+        output.write_to_stdout()?;
     }
 
     Ok(())
@@ -101,6 +99,25 @@ fn run_validate_config(config_path: PathBuf) -> Result<()> {
     Ok(())
 }
 
+fn run_evaluate(config_path: PathBuf) -> Result<()> {
+    let (config, deny_rules, allow_rules) =
+        load_config(&config_path).context("Failed to load configuration")?;
+    let input = HookInput::read_from_stdin().context("Failed to read hook input")?;
+    let result = process_hook_input_with_rules_and_protected_branches(
+        &deny_rules,
+        &allow_rules,
+        config.limits.max_chain_length,
+        &input,
+        &config.git_protection.protected_branches,
+    );
+    let output = serde_json::json!({
+        "decision": result.decision,
+        "reason": result.reason,
+    });
+    println!("{}", serde_json::to_string(&output)?);
+    Ok(())
+}
+
 fn main() -> Result<()> {
     // Initialize diagnostic logger from RUST_LOG env var (default: warn)
     env_logger::Builder::from_env(Env::default().default_filter_or("warn")).init();
@@ -110,5 +127,6 @@ fn main() -> Result<()> {
     match opts.command {
         Commands::Run { config } => run_hook(config),
         Commands::Validate { config } => run_validate_config(config),
+        Commands::Evaluate { config } => run_evaluate(config),
     }
 }

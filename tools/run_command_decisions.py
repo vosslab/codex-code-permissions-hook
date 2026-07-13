@@ -67,7 +67,7 @@ def decide_with(cfg_path: str, tool_name: str, tool_input: dict) -> tuple:
 	}
 	json_input = json.dumps(hook_input)
 	result = subprocess.run(
-		[HOOK, "run", "--config", cfg_path],
+		[HOOK, "evaluate", "--config", cfg_path],
 		input=json_input,
 		capture_output=True,
 		text=True,
@@ -77,14 +77,9 @@ def decide_with(cfg_path: str, tool_name: str, tool_input: dict) -> tuple:
 		raise RuntimeError(
 			f"hook exited {result.returncode} for {tool_name}: {result.stderr.strip()}"
 		)
-	stdout = result.stdout.strip()
-	# Empty stdout = passthrough.
-	if not stdout:
-		return ("passthrough", "")
-	parsed = json.loads(stdout)
-	hook_out = parsed.get("hookSpecificOutput", {})
-	decision = hook_out.get("permissionDecision", "passthrough")
-	reason = hook_out.get("permissionDecisionReason", "")
+	parsed = json.loads(result.stdout)
+	decision = parsed["decision"]
+	reason = parsed.get("reason") or ""
 	return (decision, reason)
 
 
