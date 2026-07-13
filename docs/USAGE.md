@@ -11,6 +11,15 @@ target/release/codex-code-permissions-hook validate \
   --config codex-code-permissions-hook.toml
 ```
 
+Compare the tracked Claude profile with the active Codex profile semantically:
+
+```bash
+source source_me.sh && python3 tools/diff_permission_configs.py
+```
+
+Use `--check` to fail when the difference no longer matches the reviewed policy
+patch in `config/codex_claude_policy_patch.json`.
+
 ## CLI
 
 The executable has two subcommands:

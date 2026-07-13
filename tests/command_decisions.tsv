@@ -261,16 +261,16 @@ deny	pkill USBImagerApp 2>/dev/null; sleep 1; .build/debug/usbimager --auto-exit
 deny	bash -c "echo x"
 deny	bash -lc "source && python3 ..."
 allow	bash script.sh
-deny	bash -n script.sh
+passthrough	bash -n script.sh
 
 # --- cat/head/tail/grep with file paths ---
-deny	cat /tmp/x.txt
-deny	head -20 /abs/path/file.txt
-deny	tail -5 /tmp/x.log
+allow	cat /tmp/x.txt
+allow	head -20 /abs/path/file.txt
+allow	tail -5 /tmp/x.log
 allow	grep pattern /tmp/x.txt
 deny	rg pattern /abs/search/dir
 allow	find . -name "*.py"
-deny	sed -n '10,20p' /tmp/file.txt
+allow	sed -n '10,20p' /tmp/file.txt
 allow	git diff HEAD -- ef_tools/docx_builder.py | sed -n '250,400p'
 
 # --- Claude Code tool names typed as Bash commands (steering bug) ---
@@ -302,16 +302,12 @@ allow	grep -n "foo\|bar" docs/active_plans/x.md
 deny	/usr/bin/grep -nE "a|b" /tmp/x.md
 # stdin filters with '|' alternation stay allowed (no file arg)
 allow	echo abc | grep -nE "a|b|c"
-# sed -n had the same [^|] regression: an address regex containing '|'
-# plus a file path must still deny.
-deny	sed -n '/a|b/,/c/p' /tmp/x.md
-deny	sed -n '/foo|bar/p' docs/active_plans/x.md
-# Known over-match (not a regression): a sed -n with a /regex/ address is
-# denied even as a stdin filter, because the '/' in the address looks like a
-# file path to the [^>]*/ scan. Same root cause as awk's /regex/ syntax.
-# Acceptable: stdin sed -n with a regex address is rare; Read or a _temp
-# script covers it. Plain-numeric stdin ranges (no '/') stay allowed.
-deny	echo abc | sed -n '/a|b/p'
+# Codex allows file-backed sed -n even when its address regex contains '|'.
+allow	sed -n '/a|b/,/c/p' /tmp/x.md
+allow	sed -n '/foo|bar/p' docs/active_plans/x.md
+# Stdin sed -n with a regex address remains allowed after removing the
+# file-reading redirect rule.
+allow	echo abc | sed -n '/a|b/p'
 allow	printf 'a\nb\n' | sed -n '1,2p'
 
 # --- sudo / gh ---
@@ -425,28 +421,23 @@ allow	printf 'a\nb\n' | tail -1
 allow	seq 1 5 | grep 3
 allow	seq 1 10 | wc -l
 
-# --- awk denied entirely (steered to the Grep tool) ---
-# awk was removed from TEXT_CMDS and given an unconditional deny. Both the
-# lead-command form and pipeline leaves are caught (the decomposer splits on
-# '|'). No file-path guard: awk as a stdin filter is denied too.
-deny	awk '/foo/{print}' docs/x.md
-deny	awk 'NR==1' /tmp/x
-deny	awk 'NR==1' </tmp/x
-deny	printf 'a b\n' | awk '{print $2}'
-deny	/usr/bin/awk '{print}' file.md
-deny	command awk '{print}' file.md
-deny	gawk '{print}' /tmp/x
-deny	mawk '{print}' /tmp/x
-# Pure awk-pipeline-leaf coverage: the source leaf (echo) is allowed, so a
-# deny here can only come from the awk leaf. (The earlier conflated row
-# `cat /tmp/x.log | awk` was removed -- the cat leaf denied independently,
-# masking which rule fired.)
-deny	echo a b | awk '{print $1}'
+# --- awk requires normal user approval ---
+# awk remains outside TEXT_CMDS, but Codex no longer hard-denies it to redirect
+# agents to an unavailable Read tool.
+passthrough	awk '/foo/{print}' docs/x.md
+passthrough	awk 'NR==1' /tmp/x
+passthrough	awk 'NR==1' </tmp/x
+passthrough	printf 'a b\n' | awk '{print $2}'
+passthrough	/usr/bin/awk '{print}' file.md
+passthrough	command awk '{print}' file.md
+passthrough	gawk '{print}' /tmp/x
+passthrough	mawk '{print}' /tmp/x
+passthrough	echo a b | awk '{print $1}'
 
 # --- File-path forms of dedicated-tool deny rules ---
-deny	cat /tmp/x.log
-deny	head /tmp/x.log
-deny	tail /tmp/x.log
+allow	cat /tmp/x.log
+allow	head /tmp/x.log
+allow	tail /tmp/x.log
 allow	grep foo /tmp/x.log
 allow	rg foo /tmp/x.log
 deny	egrep foo /tmp/x.log
@@ -454,7 +445,7 @@ deny	fgrep foo /tmp/x.log
 deny	egrep -n pat /Users/vosslab/x.py
 allow	find /tmp -name *.py
 allow	/usr/bin/find . -name *.py
-deny	sed -n 1,5p /tmp/x.txt
+allow	sed -n 1,5p /tmp/x.txt
 
 # --- Bash-side escape hatches named in the redirect-style deny reasons ---
 # `ls <dir>` and `git ls-files <pathspec>` are the allowed Bash forms when a
@@ -733,10 +724,10 @@ passthrough	command grep -n foo src/main.ts
 allow	env grep foo src/main.ts
 deny	/bin/cat src/main.ts
 deny	/usr/bin/sed -n 1,80p docs/CHANGELOG.md
-# bash/sh/zsh -n shell-script syntax check (denied; use Read tool)
-deny	bash -n /Users/vosslab/scripts/check.sh
-deny	sh -n script.sh
-deny	zsh -n script.sh
+# bash/sh/zsh -n shell-script syntax checks require normal user approval.
+passthrough	bash -n /Users/vosslab/scripts/check.sh
+passthrough	sh -n script.sh
+passthrough	zsh -n script.sh
 
 # --- Tier B: Preventive hardening (2026-05-05) ---
 # Pipe-to-interpreter (curl/wget/fetch piped to runtime)
@@ -987,14 +978,13 @@ deny	while true; do for f in a b; do echo $f; done; done
 # flips a row here.
 # ===================================================================
 
-# --- TEXT_CMDS: cat/head/tail have a file-path deny; the rest do not ---
-# (awk is intentionally absent -- denied entirely, covered above.)
+# --- TEXT_CMDS: direct file reads are allowed; awk remains passthrough. ---
 allow	cat
-deny	cat /tmp/x
+allow	cat /tmp/x
 allow	head
-deny	head /tmp/x
+allow	head /tmp/x
 allow	tail
-deny	tail /tmp/x
+allow	tail /tmp/x
 allow	colordiff
 allow	colordiff /tmp/x
 allow	comm
@@ -1005,7 +995,7 @@ allow	diff
 allow	diff /tmp/x
 allow	od
 allow	od /tmp/x
-# sed: bare and plain-path allowed; only `sed -n <range> <file>` denies.
+# sed: bare, plain-path, and `sed -n <range> <file>` forms are allowed.
 allow	sed
 allow	sed 's/a/b/' /tmp/x
 allow	seq
@@ -1423,8 +1413,8 @@ allow	find ~/.claude/projects -type f -name "*.md"
 # git reset HEAD unstage
 allow	git reset HEAD
 allow	git reset HEAD path/to/file.py
-# less <file> -> deny + steer
-deny	less docs/x.md
+# less <file> requires normal user approval.
+passthrough	less docs/x.md
 # pcregrep/ack/ag with file path
 deny	pcregrep -n PAT /tmp/x
 deny	ack PAT /tmp/x
@@ -1644,11 +1634,10 @@ allow	STATUS=$?
 allow	echo "exit=$?"
 # python3 -m http.server is auto-allowed by the broad python rule (and stays
 # allowed under the narrowed exclude). pip/venv stay passthrough (machine-
-# changing). json.tool with a file path arg is passthrough (use Read instead);
-# json.tool without args (stdin form) remains allow via the broad rule.
+# changing). json.tool with or without a file path remains auto-allowed.
 allow	python3 -m http.server 8000
 allow	python3 -m http.server --directory dist 8766 >/tmp/_httpd.log 2>&1 &
-passthrough	python3 -m json.tool /tmp/x.json
+allow	python3 -m json.tool /tmp/x.json
 passthrough	python3 -m pip install requests
 passthrough	python3 -m venv .venv
 # curl is broad-allowed; only the curl|interpreter RCE shape stays denied.

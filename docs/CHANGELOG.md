@@ -12,6 +12,10 @@
   file-structure map to expose the new operational docs.
 - Restored local Codex-reference and Claude-compatibility guide entry points so
   the documentation map has no missing internal targets.
+- Reworked `docs/RELATED_PROJECTS.md` into a sourced, confidence-tiered map of the
+  inherited Claude hook, Codex integration, repository template, and shell parser.
+- Added `tools/diff_permission_configs.py` and a reviewed semantic policy patch so
+  Claude remains the upstream policy while intentional Codex exceptions stay visible.
 
 ### Fixes and Maintenance
 
@@ -25,6 +29,11 @@
 - Made the decision runner report nonzero hook subprocess exits instead of misclassifying empty stdout from a failed process as policy passthrough.
 - Restored the inherited design-passthrough audit filtering without changing Codex behavior.
 - Applied standard Rust formatting and resolved strict Clippy warnings in the copied backend and tests.
+- Removed Codex hard denials whose recovery path depended on an unavailable `Read`
+  tool. Direct text reads and file-backed `sed -n` now allow; `awk`, `less`, and
+  shell syntax checks fall through to normal approval; unsafe path rules remain.
+- Allowed file-backed `python -m json.tool` and replaced remaining Codex `Read`-tool
+  reason text with recovery instructions that use capabilities present in Codex.
 
 ### Developer Tests and Notes
 
@@ -36,6 +45,8 @@
 - Rust unit and integration suites pass, including Codex protocol, patch protection, and compiled protected-branch runtime coverage; `cargo clippy --all-targets -- -D warnings` is clean.
 - Direct Codex stdin/stdout smoke checks confirm zero-byte allow and passthrough
   output plus valid deny JSON.
+- The semantic Claude/Codex diff matches its checked-in policy patch, all 1,265 command
+  decisions pass, and 251 focused Python repository checks pass.
 
 ## 2026-06-30
 

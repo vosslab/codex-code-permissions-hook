@@ -1,29 +1,52 @@
 # Related projects
 
-This map identifies the upstream template and platform documentation that
-directly inform this repository's maintenance and integration work.
+This map records projects with direct source, dependency, template, or runtime
+relationships to this repository.
 
-## Direct relationships
+## Confirmed related projects
 
-- [starter-repo-template](https://github.com/vosslab/starter-repo-template) is
-  the repository template identified by this project's GitHub metadata. Its
-  shared development and documentation conventions inform this checkout.
-- [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks) is the
-  platform reference for lifecycle-hook registration, event handling, and
-  trusted hook definitions.
-- [codex-code-permissions-hook](https://github.com/vosslab/codex-code-permissions-hook)
-  is the public repository for this source tree and its release history.
+### claude-code-permissions-hook
 
-## Related local references
+- Relationship: Upstream source or fork
+- Link: https://github.com/kornysietsma/claude-code-permissions-hook
+- Evidence: The import commit copies the Claude hook backend,
+  [Cargo.toml](../Cargo.toml) credits Korny Sietsma, and the Codex profile retains
+  its TOML rule model.
+- Notes: This repository adapts that backend to Codex `PreToolUse` while preserving
+  Claude policy compatibility.
 
-- [CODEX_HOOK_USAGE_GUIDE.md](CODEX_HOOK_USAGE_GUIDE.md) translates the platform
-  contract into this hook's installation and audit workflow.
-- [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) documents this repository's
-  TOML policy schema and rule-authoring conventions.
+### OpenAI Codex
 
-## Scope boundary
+- Relationship: Optional integration target
+- Link: https://github.com/openai/codex
+- Evidence: [README.md](../README.md) and the hook configuration register this
+  binary for Codex `PreToolUse`, and the saved upstream hook reference tracks
+  Codex's hook contract.
+- Notes: Codex supplies the runtime events and tool-input shapes evaluated here.
 
-- This repository is a Codex permission-hook implementation, not a replacement
-  for Codex itself or a general-purpose policy language.
-- The inherited Claude-compatible portions of the policy remain implementation
-  compatibility details; use the Codex guides for active integration behavior.
+### starter-repo-template
+
+- Relationship: Upstream source or fork
+- Link: https://github.com/vosslab/starter-repo-template
+- Evidence: The repository history records a reset to the Rust base template, and
+  the template provides the shared documentation and development conventions.
+- Notes: Template inheritance concerns repository maintenance rather than runtime
+  permission decisions.
+
+### brush-parser
+
+- Relationship: Direct dependency
+- Link: https://crates.io/crates/brush-parser
+- Evidence: [Cargo.toml](../Cargo.toml) declares `brush-parser`, and
+  [src/decomposer.rs](../src/decomposer.rs) uses it to parse compound shell commands
+  before rule evaluation.
+- Notes: The parser lets the hook evaluate individual command leaves rather than an
+  opaque compound command string.
+
+## Evidence notes
+
+Repository evidence comes from [README.md](../README.md), [Cargo.toml](../Cargo.toml),
+source imports, the commit history, the active policy files, and the saved Codex hook
+reference. Bounded web discovery verified the upstream repositories, package registry
+entry, and Codex runtime source. Similar hook and policy projects without a direct
+repository link, dependency, citation, or reciprocal reference were not included.

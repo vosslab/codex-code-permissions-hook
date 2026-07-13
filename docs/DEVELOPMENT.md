@@ -16,6 +16,8 @@ profiles, and its regression fixtures.
 
 - Update `codex-code-permissions-hook.toml` for Codex behavior and preserve the
   shared rule layout where it still applies to the inherited backend.
+- Run `source source_me.sh && python3 tools/diff_permission_configs.py --check`
+  to verify that Claude-to-Codex differences match the reviewed policy patch.
 - Add or revise a matching row in [command_decisions.tsv](../tests/command_decisions.tsv)
   for each intentional decision change.
 - Run `validate --config <path>` before relying on a changed TOML profile.

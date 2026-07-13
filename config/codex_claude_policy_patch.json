@@ -1,0 +1,333 @@
+{
+  "allow": {
+    "changed": [],
+    "claude_only": [
+      {
+        "command_exclude_regex": "${NO_CMD_SUB}|\\s+-m\\s+(pip|venv|ensurepip)\\b|\\s+-m\\s+json\\.tool\\s+\\S",
+        "command_regex": "^(python3?|/opt/homebrew/opt/python@3\\.12/bin/python3\\.12|PYTHONPATH=)\\s?",
+        "tool": "Bash"
+      },
+      {
+        "file_path_exclude_regex": "${NO_TRAVERSAL}",
+        "file_path_regex": "${PROJECT_PATH}",
+        "tool": "Edit"
+      },
+      {
+        "file_path_exclude_regex": "${NO_TRAVERSAL}",
+        "file_path_regex": "${PROJECT_PATH}",
+        "tool": "Glob"
+      },
+      {
+        "file_path_exclude_regex": "${NO_TRAVERSAL}",
+        "file_path_regex": "${PROJECT_PATH}",
+        "tool": "Grep"
+      },
+      {
+        "file_path_exclude_regex": "${NO_TRAVERSAL}",
+        "file_path_regex": "${PROJECT_PATH}",
+        "tool": "Write"
+      }
+    ],
+    "codex_only": [
+      {
+        "command_exclude_regex": "${NO_CMD_SUB}|\\s+-m\\s+(pip|venv|ensurepip)\\b",
+        "command_regex": "^(python3?|/opt/homebrew/opt/python@3\\.12/bin/python3\\.12|PYTHONPATH=)\\s?",
+        "tool": "Bash"
+      },
+      {
+        "file_path_exclude_regex": "${NO_TRAVERSAL}",
+        "file_path_regex": "${NSH_PATH}",
+        "tool": "Edit"
+      },
+      {
+        "file_path_exclude_regex": "${NO_TRAVERSAL}",
+        "file_path_regex": "${NSH_PATH}",
+        "tool": "Glob"
+      },
+      {
+        "file_path_exclude_regex": "${NO_TRAVERSAL}",
+        "file_path_regex": "${NSH_PATH}",
+        "tool": "Grep"
+      },
+      {
+        "file_path_exclude_regex": "${NO_TRAVERSAL}",
+        "file_path_regex": "${NSH_PATH}",
+        "tool": "Write"
+      }
+    ]
+  },
+  "deny": {
+    "changed": [
+      {
+        "claude": {
+          "command_exclude_regex": "\\s(${SAFE_ABS_ZONES})(?:/|\\s|$)",
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(grep|rg)\\b[^>]*\\s(/|~|\\.\\.)",
+          "reason": "Use a relative path or a workspace path (e.g. `grep pat src/file.py`, `rg pat ~/<workspace>/repo/`). Relative, workspace (`~/<workspace>/...`, `/Users/<me>/<workspace>/...`), and `/tmp` paths are allowed. A path outside those safe zones -- arbitrary absolute (`/etc/...`), bare `~`, or `..` traversal -- is rejected for scope control: it can flood context with an unbounded scan. To read one known file by an out-of-zone absolute path use the Read tool. Pipeline filters on bounded stdout stay allowed (`... | grep pat`).",
+          "tool": "Bash"
+        },
+        "codex": {
+          "command_exclude_regex": "\\s(${SAFE_ABS_ZONES})(?:/|\\s|$)",
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(grep|rg)\\b[^>]*\\s(/|~|\\.\\.)",
+          "reason": "Use a relative path or a workspace path (e.g. `grep pat src/file.py`, `rg pat ~/<workspace>/repo/`). Relative, workspace (`~/<workspace>/...`, `/Users/<me>/<workspace>/...`), and `/tmp` paths are allowed. A path outside those safe zones -- arbitrary absolute (`/etc/...`), bare `~`, or `..` traversal -- is rejected for scope control. For one authorized file in another readable working directory, run `rg -n '^' <relative-file>` from that directory. Pipeline filters on bounded stdout stay allowed (`... | grep pat`).",
+          "tool": "Bash"
+        },
+        "identity": {
+          "command_exclude_regex": "\\s(${SAFE_ABS_ZONES})(?:/|\\s|$)",
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(grep|rg)\\b[^>]*\\s(/|~|\\.\\.)",
+          "tool": "Bash"
+        }
+      },
+      {
+        "claude": {
+          "command_regex": ".*${GIT_INVOCATION}grep\\b",
+          "reason": "Use `git ls-files <pathspec>` to list candidate files, then use the Read tool on targeted files. `grep` and `rg` remain useful as pipeline filters on already-bounded command output (`git ls-files | grep pat`). For broad or structured content searches write a `_temp.py` helper that starts from a bounded candidate list (e.g. `git ls-files`) and run it with `source source_me.sh && python3 _temp.py`. `git grep` is denied to keep repo content search on the bounded workflow: list candidates first, then inspect targeted files. Scope-control rule, not anti-grep.",
+          "tool": "Bash"
+        },
+        "codex": {
+          "command_regex": ".*${GIT_INVOCATION}grep\\b",
+          "reason": "Use `git ls-files <pathspec>` to list candidates, then `rg -n <pattern> <relative-file>` to inspect targeted files. Use `rg -n '^' <relative-file>` when every line is needed. For broad or structured searches write a `_temp.py` helper that starts from a bounded candidate list and run it with `source source_me.sh && python3 _temp.py`. `git grep` is denied to keep repo content search bounded. Scope-control rule, not anti-grep.",
+          "tool": "Bash"
+        },
+        "identity": {
+          "command_regex": ".*${GIT_INVOCATION}grep\\b",
+          "tool": "Bash"
+        }
+      },
+      {
+        "claude": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(pcregrep|ack|ag)\\b[^>]*/",
+          "reason": "Use `git ls-files <pathspec>` to identify candidate files, then use the Read tool on the relevant files. `pcregrep`, `ack`, and `ag` with a file path argument are rejected for the same scope-control reason as `grep`/`rg` with a file path; piped forms on bounded stdout stay allowed.",
+          "tool": "Bash"
+        },
+        "codex": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(pcregrep|ack|ag)\\b[^>]*/",
+          "reason": "Use `git ls-files <pathspec>` to identify candidates, then `rg -n <pattern> <relative-file>` on the relevant files. `pcregrep`, `ack`, and `ag` with a file path argument are rejected for the same scope-control reason as `grep`/`rg` with a file path; piped forms on bounded stdout stay allowed.",
+          "tool": "Bash"
+        },
+        "identity": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(pcregrep|ack|ag)\\b[^>]*/",
+          "tool": "Bash"
+        }
+      },
+      {
+        "claude": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}osascript\\b",
+          "reason": "Ask the user to run any scripted app step. For app screenshots, use a dedicated screenshot helper that targets the window for you.",
+          "tool": "Bash"
+        },
+        "codex": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}osascript\\b",
+          "reason": "Ask the user to run any scripted app step. For app screenshots, use ~/nsh/easy-screenshot/run.sh --application <App>, which targets the window for you.",
+          "tool": "Bash"
+        },
+        "identity": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}osascript\\b",
+          "tool": "Bash"
+        }
+      },
+      {
+        "claude": {
+          "command_regex": "^\\s*(Grep|Read|Glob|Edit|Write|Task|WebFetch|WebSearch)\\b",
+          "reason": "Invoke the actual tool, not its name typed into Bash. `Read` reads a file; `Edit`/`Write` modify files; `Task`/`WebFetch`/`WebSearch` are first-class tool calls. For file search use `git ls-files <pathspec>` plus the Read tool. Typing `Grep`, `Glob`, `Read`, `Edit`, `Write`, `Task`, `WebFetch`, or `WebSearch` into Bash runs whatever (if anything) is on PATH by that name, not the Claude Code tool.",
+          "tool": "Bash"
+        },
+        "codex": {
+          "command_regex": "^\\s*(Grep|Read|Glob|Edit|Write|Task|WebFetch|WebSearch)\\b",
+          "reason": "Tool labels are not shell commands. Use the tools exposed in the current session. For bounded text inspection, use `git ls-files <pathspec>` to find candidates and `rg -n <pattern> <relative-file>` or `rg -n '^' <relative-file>` to read them. Typing `Grep`, `Glob`, `Read`, `Edit`, `Write`, `Task`, `WebFetch`, or `WebSearch` into Bash runs whatever (if anything) is on PATH by that name.",
+          "tool": "Bash"
+        },
+        "identity": {
+          "command_regex": "^\\s*(Grep|Read|Glob|Edit|Write|Task|WebFetch|WebSearch)\\b",
+          "tool": "Bash"
+        }
+      },
+      {
+        "claude": {
+          "command_regex": "^screencapture\\b.*(${NO_CMD_SUB})",
+          "reason": "Look up the window id in a separate step, then pass that literal id to screencapture. A screenshot helper script can target the window for you.",
+          "tool": "Bash"
+        },
+        "codex": {
+          "command_regex": "^screencapture\\b.*(${NO_CMD_SUB})",
+          "reason": "Look up the window id in a separate step, then pass that literal id to screencapture. Or use ~/nsh/easy-screenshot/run.sh --application <App>, which targets the window for you.",
+          "tool": "Bash"
+        },
+        "identity": {
+          "command_regex": "^screencapture\\b.*(${NO_CMD_SUB})",
+          "tool": "Bash"
+        }
+      },
+      {
+        "claude": {
+          "file_path_regex": "^/(etc|usr|opt|System|Library)/",
+          "reason": "Use project paths under ~/projects/ or scratch files in /tmp/. Editing system files (`/etc/`, `/usr/`, `/opt/`, `/System/`, `/Library/`) is rejected.",
+          "tool": "Edit"
+        },
+        "codex": {
+          "file_path_regex": "^/(etc|usr|opt|System|Library)/",
+          "reason": "Use project paths under ~/nsh/ or scratch files in /tmp/. Editing system files (`/etc/`, `/usr/`, `/opt/`, `/System/`, `/Library/`) is rejected.",
+          "tool": "Edit"
+        },
+        "identity": {
+          "file_path_regex": "^/(etc|usr|opt|System|Library)/",
+          "tool": "Edit"
+        }
+      },
+      {
+        "claude": {
+          "file_path_regex": "^/(etc|usr|opt|System|Library)/",
+          "reason": "Use project paths under ~/projects/ or scratch files in /tmp/. Writing to system directories (`/etc/`, `/usr/`, `/opt/`, `/System/`, `/Library/`) is rejected.",
+          "tool": "Write"
+        },
+        "codex": {
+          "file_path_regex": "^/(etc|usr|opt|System|Library)/",
+          "reason": "Use project paths under ~/nsh/ or scratch files in /tmp/. Writing to system directories (`/etc/`, `/usr/`, `/opt/`, `/System/`, `/Library/`) is rejected.",
+          "tool": "Write"
+        },
+        "identity": {
+          "file_path_regex": "^/(etc|usr|opt|System|Library)/",
+          "tool": "Write"
+        }
+      }
+    ],
+    "claude_only": [
+      {
+        "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(awk|gawk|mawk)\\b",
+        "reason": "For line-matching in files, use `git ls-files <pathspec>` to identify candidates and use the Read tool on targeted files. Piped `grep` or `rg` on already-bounded stdout stays allowed (`<allowed cmd> | grep pat`, `<allowed cmd> | rg pat`). For field extraction from piped output use `cut`. For structured parsing write a `_temp.py` helper that starts from a bounded candidate list such as `git ls-files`, then run it with `source source_me.sh && python3 _temp.py`. `awk`/`gawk`/`mawk` is denied including pipeline leaves -- no pipe exception.",
+        "tool": "Bash"
+      },
+      {
+        "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(bash|sh|zsh)\\s+-n\\b",
+        "reason": "Inspect the script with the Read tool. To execute, use `bash script.sh` or ask for user approval. `bash`/`sh`/`zsh -n` syntax-check is rejected; the shell is not the right tool for script analysis.",
+        "tool": "Bash"
+      },
+      {
+        "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(cat|head|tail)\\b[^>]*/",
+        "reason": "Invoke the Read tool: file_path=<path>, with optional offset and limit. For piped stdout, `... | head -5`, `... | tail -5`, `... | cat` are still allowed. `cat`/`head`/`tail` against a file path is rejected because Read provides line numbers and bounded slicing.",
+        "tool": "Bash"
+      },
+      {
+        "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}less\\b[^>]*/",
+        "reason": "Invoke the Read tool: file_path=<path>, with optional offset and limit. `less <file>` is rejected because Read provides line numbers and bounded slicing; the pipeline form `... | less` is not the same shape and is not auto-allowed either.",
+        "tool": "Bash"
+      },
+      {
+        "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b[^>]*/",
+        "reason": "Invoke the Read tool: file_path=<path>, offset=<start>, limit=<count> to extract a line range from a file. For piped stdout, `... | sed -n '10,20p'` is still allowed. `sed -n` against a file path is rejected because Read does file-range extraction directly.",
+        "tool": "Bash"
+      }
+    ],
+    "codex_only": [
+      {
+        "command_regex": "(?m)^\\*\\*\\* (Add|Update|Delete) File: (?:.*/)?\\.(env|secret)([[:space:]]|$)",
+        "reason": "Sensitive environment and secret files are outside the editable policy surface.",
+        "tool": "apply_patch"
+      },
+      {
+        "command_regex": "(?m)^\\*\\*\\* (Add|Update|Delete) File: /(etc|usr|opt|System|Library)/",
+        "reason": "Keep patches inside the workspace or /tmp. System paths are outside the editable policy surface.",
+        "tool": "apply_patch"
+      }
+    ]
+  },
+  "values": {
+    "claude": {
+      "audit": {
+        "audit_file": "/tmp/claude-tool-use.json",
+        "audit_level": "matched",
+        "passthrough_log_file": "/tmp/claude-passthrough.json"
+      },
+      "git_protection": {
+        "protected_branches": [
+          "main",
+          "master"
+        ],
+        "protected_refs": [
+          "refs/heads/main",
+          "refs/heads/master"
+        ]
+      },
+      "limits": {
+        "max_chain_length": 5
+      },
+      "variables": {
+        "BUILD_OUT": "\\.build/|target/(?:debug|release)/",
+        "CHECKSUM_CMDS": "md5|md5sum|shasum|sha256sum",
+        "CLAUDE_PATH": "^$HOME/\\.claude/",
+        "DEV_CMDS": "bandit|make|pyflakes",
+        "FIND_SAFE_PATH_ARG": "(?:\\.(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|~/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|/(?:private/)?tmp(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|/Users/[^/\\s]+/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|[$]HOME/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|(?:~|/Users/[^/\\s]+|[$]HOME)/\\.claude/(?:agents|commands|skills|plugins|plans|projects)(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|[A-Za-z_][A-Za-z0-9_-]*(?:/[A-Za-z0-9_./()'\"\\\\-]+)?)",
+        "FORMAT_CMDS": "column|expand|fmt|fold|nl|paste|unexpand",
+        "FS_CMDS": "basename|cd|chmod|cp|dirname|du|df|ln|ls|lsof|mkdir|mktemp|open|readlink|realpath|stat|tar|touch|tree|type|unlink|unzip|which",
+        "GIT_INVOCATION": "(?:^|\\s)(?:command\\s+)?(?:[A-Za-z0-9_]+=\\S+\\s+)*(?:/[^\\s]+/)?git(?:\\s+|$)(?:-(?:C|c)\\s+\\S+\\s+|--git-dir(?:=|\\s+)\\S+\\s+|--work-tree(?:=|\\s+)\\S+\\s+)*",
+        "HOME_PATH": "^$HOME/(projects(/|$)|\\.[^/]+(/|$))",
+        "INSPECT_CMDS": "file|mediainfo|pdfinfo|pdftotext",
+        "LIBRARY_READ_PATH": "^$HOME/Library/(LaunchAgents|Logs)/",
+        "LOCAL_RUNTIMES": "node|deno",
+        "NON_TMP_ROOTS": "Users|home|usr|etc|opt|var|bin|sbin|root|sys|proc|dev|Library|System|Applications|boot|mnt|media|nsh",
+        "NO_BACKTICK": "`",
+        "NO_CMD_SUB": "`|\\$\\(",
+        "NO_TRAVERSAL": "\\.\\.",
+        "PROC_CMDS": "pgrep|ps|sleep|timeout|wait",
+        "PROJECT_PATH": "^$HOME/projects(/|$)",
+        "SAFE_ABS_ZONES": "/(?:private/)?tmp|~/${WORKSPACE_ROOT}|/Users/[^/\\s]+/${WORKSPACE_ROOT}|[$]HOME/${WORKSPACE_ROOT}|(?:~|/Users/[^/\\s]+|[$]HOME)/\\.claude/(?:agents|commands|skills|plugins|plans|projects)",
+        "SAFE_CMDS": "${TEXT_CMDS}|${SEARCH_CMDS}|${FORMAT_CMDS}|${INSPECT_CMDS}|${CHECKSUM_CMDS}|${FS_CMDS}|${PROC_CMDS}|${SYS_CMDS}|${DEV_CMDS}",
+        "SEARCH_CMDS": "grep|jq|rg",
+        "SYS_CMDS": "curl|date|echo|env|export|expr|false|id|nproc|numfmt|printenv|printf|pwd|screencapture|source|test|true|tty|uname|whoami|xcrun|xxd",
+        "TEXT_CMDS": "cat|colordiff|comm|cut|diff|head|od|sed|seq|shuf|sort|tac|tail|tee|tr|uniq|wc|xargs",
+        "TMP_SCOPED_CMDS": "ffmpeg|sox|convert|magick|mogrify|gm|optipng|pngcrush|jpegoptim|cwebp|tesseract|qpdf|pdftk|gs|lame|flac|pandoc|soffice|pdftoppm",
+        "TOOL_PATH": "(?:/(?:[^/\\s]+/)*)?",
+        "TOOL_PREFIX": "(?:command\\s+|env\\s+)?",
+        "WORKSPACE_ROOT": "projects"
+      }
+    },
+    "codex": {
+      "audit": {
+        "audit_file": "/tmp/codex-tool-use.json",
+        "audit_level": "all",
+        "passthrough_log_file": "/tmp/codex-passthrough.json"
+      },
+      "git_protection": {
+        "protected_branches": [
+          "main",
+          "master"
+        ],
+        "protected_refs": [
+          "refs/heads/main",
+          "refs/heads/master"
+        ]
+      },
+      "limits": {
+        "max_chain_length": 5
+      },
+      "variables": {
+        "BUILD_OUT": "\\.build/|target/(?:debug|release)/",
+        "CHECKSUM_CMDS": "md5|md5sum|shasum|sha256sum",
+        "CLAUDE_PATH": "^$HOME/\\.claude/",
+        "DEV_CMDS": "bandit|make|pyflakes",
+        "FIND_SAFE_PATH_ARG": "(?:\\.(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|~/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|/(?:private/)?tmp(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|/Users/[^/\\s]+/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|[$]HOME/${WORKSPACE_ROOT}(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|(?:~|/Users/[^/\\s]+|[$]HOME)/\\.claude/(?:agents|commands|skills|plugins|plans|projects)(?:/[A-Za-z0-9_./()'\"\\\\-]+)?|[A-Za-z_][A-Za-z0-9_-]*(?:/[A-Za-z0-9_./()'\"\\\\-]+)?)",
+        "FORMAT_CMDS": "column|expand|fmt|fold|nl|paste|unexpand",
+        "FS_CMDS": "basename|cd|chmod|cp|dirname|du|df|ln|ls|lsof|mkdir|mktemp|open|readlink|realpath|stat|tar|touch|tree|type|unlink|unzip|which",
+        "GIT_INVOCATION": "(?:^|\\s)(?:command\\s+)?(?:[A-Za-z0-9_]+=\\S+\\s+)*(?:/[^\\s]+/)?git(?:\\s+|$)(?:-(?:C|c)\\s+\\S+\\s+|--git-dir(?:=|\\s+)\\S+\\s+|--work-tree(?:=|\\s+)\\S+\\s+)*",
+        "HOME_PATH": "^$HOME/(nsh(/|$)|\\.[^/]+(/|$))",
+        "INSPECT_CMDS": "file|mediainfo|pdfinfo|pdftotext",
+        "LIBRARY_READ_PATH": "^$HOME/Library/(LaunchAgents|Logs)/",
+        "LOCAL_RUNTIMES": "node|deno",
+        "NON_TMP_ROOTS": "Users|home|usr|etc|opt|var|bin|sbin|root|sys|proc|dev|Library|System|Applications|boot|mnt|media|nsh",
+        "NO_BACKTICK": "`",
+        "NO_CMD_SUB": "`|\\$\\(",
+        "NO_TRAVERSAL": "\\.\\.",
+        "NSH_PATH": "^$HOME/nsh(/|$)",
+        "PROC_CMDS": "pgrep|ps|sleep|timeout|wait",
+        "SAFE_ABS_ZONES": "/(?:private/)?tmp|~/${WORKSPACE_ROOT}|/Users/[^/\\s]+/${WORKSPACE_ROOT}|[$]HOME/${WORKSPACE_ROOT}|(?:~|/Users/[^/\\s]+|[$]HOME)/\\.claude/(?:agents|commands|skills|plugins|plans|projects)",
+        "SAFE_CMDS": "${TEXT_CMDS}|${SEARCH_CMDS}|${FORMAT_CMDS}|${INSPECT_CMDS}|${CHECKSUM_CMDS}|${FS_CMDS}|${PROC_CMDS}|${SYS_CMDS}|${DEV_CMDS}",
+        "SEARCH_CMDS": "grep|jq|rg",
+        "SYS_CMDS": "curl|date|echo|env|export|expr|false|id|nproc|numfmt|printenv|printf|pwd|screencapture|source|test|true|tty|uname|whoami|xcrun|xxd",
+        "TEXT_CMDS": "cat|colordiff|comm|cut|diff|head|od|sed|seq|shuf|sort|tac|tail|tee|tr|uniq|wc|xargs",
+        "TMP_SCOPED_CMDS": "ffmpeg|sox|convert|magick|mogrify|gm|optipng|pngcrush|jpegoptim|cwebp|tesseract|qpdf|pdftk|gs|lame|flac|pandoc|soffice|pdftoppm",
+        "TOOL_PATH": "(?:/(?:[^/\\s]+/)*)?",
+        "TOOL_PREFIX": "(?:command\\s+|env\\s+)?",
+        "WORKSPACE_ROOT": "nsh"
+      }
+    }
+  }
+}

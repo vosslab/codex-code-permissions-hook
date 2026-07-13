@@ -11,6 +11,7 @@ cargo test
 
 echo ""
 source "$REPO_ROOT/source_me.sh"
+python3 "$REPO_ROOT/tools/diff_permission_configs.py" --check
 python3 "$REPO_ROOT/tools/run_command_decisions.py"
 # Keep only the release binary; drop ~662M of build scratch.
 rm -rf \
