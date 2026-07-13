@@ -1,0 +1,827 @@
+#![forbid(unsafe_code)]
+#![warn(clippy::all)]
+
+use crate::config::Rule;
+use crate::hook_io::HookInput;
+use log::{debug, trace};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// Helper: parse git invocation to extract effective cwd and verb.
+/// Given a leaf command string, identifies:
+/// - (a) the "verb" after git/git -c/-C/--git-dir/--work-tree
+/// - (b) the effective cwd (the -C path resolved against hook_cwd, or hook_cwd if absent)
+/// Returns (verb, effective_cwd) on success, or None on parse error.
+fn parse_git_invocation(leaf: &str, hook_cwd: &Path) -> Option<(String, PathBuf)> {
+    let parts: Vec<&str> = leaf.split_whitespace().collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut idx = 0;
+
+    // Check for "command git" form
+    if parts[idx] == "command" && idx + 1 < parts.len() && parts[idx + 1] == "git" {
+        idx = 2;
+    } else if parts[idx] == "git" {
+        idx = 1;
+    } else if parts[idx].ends_with("/git") {
+        idx = 1;
+    } else {
+        // Check for environment variable prefix (GIT_VAR=val git ...)
+        if parts[idx].contains('=') && parts[idx].chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+            idx += 1;
+            // Skip multiple env vars
+            while idx < parts.len() && parts[idx].contains('=') {
+                idx += 1;
+            }
+            if idx < parts.len() && (parts[idx] == "git" || parts[idx].ends_with("/git")) {
+                idx += 1;
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    }
+
+    let mut effective_cwd = hook_cwd.to_path_buf();
+
+    // Parse git options: -c key=val, -C path, --git-dir, --work-tree
+    while idx < parts.len() && parts[idx].starts_with('-') {
+        if parts[idx] == "-c" && idx + 1 < parts.len() {
+            idx += 2; // Skip -c and value
+        } else if parts[idx] == "-C" && idx + 1 < parts.len() {
+            // Resolve -C path against hook_cwd
+            let path_str = parts[idx + 1];
+            effective_cwd = if path_str.starts_with('/') {
+                PathBuf::from(path_str)
+            } else {
+                hook_cwd.join(path_str)
+            };
+            idx += 2;
+        } else if parts[idx].starts_with("--git-dir=") || parts[idx].starts_with("--work-tree=") {
+            idx += 1;
+        } else if parts[idx] == "--git-dir" || parts[idx] == "--work-tree" {
+            idx += 2; // Skip option and value
+        } else {
+            break;
+        }
+    }
+
+    // The first non-option token is the verb
+    if idx < parts.len() {
+        let verb = parts[idx].to_string();
+        Some((verb, effective_cwd))
+    } else {
+        None
+    }
+}
+
+/// Get the current branch name for a given cwd.
+/// Returns Some(branch_name) on success, None if:
+/// - git command fails
+/// - detached HEAD (returned as "HEAD")
+/// - cwd is not a git repo
+/// Fails closed: if branch lookup fails, return None.
+fn get_current_branch(cwd: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(&["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let branch = String::from_utf8(output.stdout)
+        .ok()?
+        .trim()
+        .to_string();
+
+    if branch.is_empty() {
+        None
+    } else {
+        Some(branch)
+    }
+}
+
+/// Check if a git command would run on a protected branch.
+/// For commands with -C option, resolve the effective cwd and check that branch.
+/// If branch lookup fails or cwd is unresolvable, return true (fail-closed).
+fn is_on_protected_branch(
+    command: &str,
+    hook_cwd: &str,
+    protected_branches: &[String],
+) -> bool {
+    let hook_cwd_path = Path::new(hook_cwd);
+
+    // Try to parse git invocation to get verb and effective cwd
+    if let Some((_, effective_cwd)) = parse_git_invocation(command, hook_cwd_path) {
+        // Check if effective_cwd is a git repo and on a protected branch
+        if let Some(current_branch) = get_current_branch(&effective_cwd) {
+            // Detached HEAD ("HEAD") is not protected
+            if current_branch == "HEAD" {
+                return false;
+            }
+            // Check if current branch is in protected list
+            return protected_branches.iter().any(|pb| pb == &current_branch);
+        }
+    }
+
+    // Fail-closed: if we can't determine the branch, return true
+    true
+}
+
+/// Checks rules against input with optional protected branches support.
+/// Internal function that accepts protected_branches list.
+fn check_rules_internal(
+    rules: &[Rule],
+    input: &HookInput,
+    protected_branches: &[String],
+) -> Option<String> {
+    trace!(
+        "Checking {} rules for tool: {}",
+        rules.len(),
+        input.tool_name
+    );
+
+    for (idx, rule) in rules.iter().enumerate() {
+        // Match tool name: use tool_regex if present, otherwise exact match
+        let tool_matches = if let Some(ref regex) = rule.tool_regex {
+            regex.is_match(&input.tool_name)
+        } else {
+            rule.tool == input.tool_name
+        };
+        if !tool_matches {
+            trace!("Rule {} skipped - tool mismatch", idx);
+            continue;
+        }
+
+        trace!("Evaluating rule {} for tool: {}", idx, input.tool_name);
+        if let Some(auto_reason) = check_rule_with_context(rule, input, protected_branches) {
+            // Custom reason is prepended; auto-generated reason with the
+            // actual command/path is always appended for specificity.
+            let reason = match &rule.reason {
+                Some(custom) => format!("{} ({})", custom, auto_reason),
+                None => auto_reason,
+            };
+            debug!("Rule {} matched: {:?}", idx, reason);
+            return Some(reason);
+        }
+    }
+    trace!("No rules matched for tool: {}", input.tool_name);
+    None
+}
+
+/// Public API: Checks rules against input, returning the reason if a rule matches.
+/// Uses default empty protected_branches list for backward compatibility.
+pub fn check_rules(rules: &[Rule], input: &HookInput) -> Option<String> {
+    check_rules_internal(rules, input, &[])
+}
+
+/// Public API: Checks rules with protected branches list.
+pub fn check_rules_with_protected_branches(
+    rules: &[Rule],
+    input: &HookInput,
+    protected_branches: &[String],
+) -> Option<String> {
+    check_rules_internal(rules, input, protected_branches)
+}
+
+
+/// Check if a rule is tool-only (no regex or subagent fields set).
+/// Such rules match any input for the given tool name.
+fn is_tool_only_rule(rule: &Rule) -> bool {
+    rule.file_path_regex.is_none()
+        && rule.file_path_exclude_regex.is_none()
+        && rule.command_regex.is_none()
+        && rule.command_exclude_regex.is_none()
+        && rule.subagent_type.is_none()
+        && rule.subagent_type_regex.is_none()
+        && rule.subagent_type_exclude_regex.is_none()
+        && rule.prompt_regex.is_none()
+        && rule.prompt_exclude_regex.is_none()
+}
+
+fn check_rule_with_context(
+    rule: &Rule,
+    input: &HookInput,
+    protected_branches: &[String],
+) -> Option<String> {
+    // Tool-only rules (e.g. [[allow]] tool = "WebFetch") match any input for that tool
+    if is_tool_only_rule(rule) {
+        return Some(format!("Matched tool-only rule for {}", input.tool_name));
+    }
+
+    match input.tool_name.as_str() {
+        "Read" | "Write" | "Edit" => {
+            if let Some(file_path) = input.extract_field("file_path")
+                && check_field_with_exclude(
+                    &file_path,
+                    &rule.file_path_regex,
+                    &rule.file_path_exclude_regex,
+                )
+            {
+                return Some(format!(
+                    "Matched rule for {} with file_path: {}",
+                    input.tool_name, file_path
+                ));
+            }
+        }
+        "Glob" | "Grep" => {
+            // Glob and Grep use "path" field, not "file_path".
+            // When "path" is omitted, Claude uses cwd instead, so
+            // fall back to cwd to avoid unnecessary passthroughs.
+            let raw_path = input
+                .extract_field("path")
+                .unwrap_or_else(|| input.cwd.clone());
+            // Absolutize relative paths by prepending cwd
+            let effective_path = if raw_path.starts_with('/') {
+                raw_path
+            } else {
+                format!("{}/{}", input.cwd, raw_path)
+            };
+            if check_field_with_exclude(
+                &effective_path,
+                &rule.file_path_regex,
+                &rule.file_path_exclude_regex,
+            ) {
+                return Some(format!(
+                    "Matched rule for {} with path: {}",
+                    input.tool_name, effective_path
+                ));
+            }
+        }
+        "Bash" | "apply_patch" => {
+            if let Some(command) = input.extract_field("command")
+                && check_field_with_exclude(
+                    &command,
+                    &rule.command_regex,
+                    &rule.command_exclude_regex,
+                )
+            {
+                // If protected_branch_check is set, verify we're on a protected branch
+                if let Some(true) = rule.protected_branch_check {
+                    if !is_on_protected_branch(&command, &input.cwd, protected_branches) {
+                        trace!("Rule matched but not on protected branch");
+                        return None;
+                    }
+                }
+                return Some(format!(
+                    "Matched rule for {} with command: {}",
+                    input.tool_name, command
+                ));
+            }
+        }
+        "Task" | "Agent" => {
+            // Missing subagent_type: no match, falls through to passthrough.
+            // This is fail-closed behavior -- unnamed agents require user approval.
+            let subagent_type = match input.extract_field("subagent_type") {
+                Some(st) => st,
+                None => return None,
+            };
+            if check_subagent_type(rule, &subagent_type) {
+                return Some(format!(
+                    "Matched rule for {} with subagent_type: {}",
+                    input.tool_name, subagent_type
+                ));
+            }
+            if let Some(prompt) = input.extract_field("prompt")
+                && check_field_with_exclude(&prompt, &rule.prompt_regex, &rule.prompt_exclude_regex)
+            {
+                return Some(format!(
+                    "Matched rule for {} with prompt pattern",
+                    input.tool_name
+                ));
+            }
+        }
+        _ => {}
+    }
+
+    None
+}
+
+fn check_field_with_exclude(
+    value: &str,
+    main_regex: &Option<regex::Regex>,
+    exclude_regex: &Option<regex::Regex>,
+) -> bool {
+    if let Some(regex) = main_regex {
+        if !regex.is_match(value) {
+            trace!("Main regex didn't match value: {}", value);
+            return false;
+        }
+        if let Some(exclude) = exclude_regex
+            && exclude.is_match(value)
+        {
+            debug!(
+                "Rule matched but EXCLUDED by exclude pattern. Value: {}",
+                value
+            );
+            return false;
+        }
+        trace!("Field matched: {}", value);
+        return true;
+    }
+    false
+}
+
+fn check_subagent_type(rule: &Rule, subagent_type: &str) -> bool {
+    // Check exact match via subagent_type field
+    if let Some(ref expected_type) = rule.subagent_type {
+        if expected_type != subagent_type {
+            trace!(
+                "Subagent type didn't match. Expected: {}, got: {}",
+                expected_type, subagent_type
+            );
+            return false;
+        }
+    // Check regex match via subagent_type_regex field
+    } else if let Some(ref regex) = rule.subagent_type_regex {
+        if !regex.is_match(subagent_type) {
+            trace!(
+                "Subagent type didn't match regex. Got: {}",
+                subagent_type
+            );
+            return false;
+        }
+    } else {
+        // No subagent_type or subagent_type_regex set
+        return false;
+    }
+
+    // Check exclude pattern
+    if let Some(ref exclude) = rule.subagent_type_exclude_regex
+        && exclude.is_match(subagent_type)
+    {
+        debug!(
+            "Subagent type matched but EXCLUDED by exclude pattern: {}",
+            subagent_type
+        );
+        return false;
+    }
+    trace!("Subagent type matched: {}", subagent_type);
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use regex::Regex;
+
+    #[test]
+    fn test_check_field_with_exclude() {
+        let main_regex = Some(Regex::new(r"^/home/.*").unwrap());
+        let exclude_regex = Some(Regex::new(r"\.\.").unwrap());
+
+        assert!(check_field_with_exclude(
+            "/home/user/file.txt",
+            &main_regex,
+            &exclude_regex
+        ));
+        assert!(!check_field_with_exclude(
+            "/home/user/../etc/passwd",
+            &main_regex,
+            &exclude_regex
+        ));
+        assert!(!check_field_with_exclude(
+            "/etc/passwd",
+            &main_regex,
+            &exclude_regex
+        ));
+    }
+
+    #[test]
+    fn test_is_tool_only_rule() {
+        let tool_only = Rule {
+            tool: "WebFetch".to_string(),
+            tool_regex: None,
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        assert!(is_tool_only_rule(&tool_only));
+    }
+
+    #[test]
+    fn test_tool_only_with_regex_not_tool_only() {
+        let with_regex = Rule {
+            tool: "Bash".to_string(),
+            tool_regex: None,
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: Some(Regex::new(r"^cargo").unwrap()),
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        assert!(!is_tool_only_rule(&with_regex));
+    }
+
+    #[test]
+    fn test_tool_only_rule_matches() {
+        let rule = Rule {
+            tool: "WebFetch".to_string(),
+            tool_regex: None,
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "WebFetch".to_string(),
+            tool_input: serde_json::json!({"url": "https://example.com"}),
+        };
+        let result = check_rule_with_context(&rule, &input, &[]);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("tool-only"));
+    }
+
+    #[test]
+    fn test_glob_uses_path_field() {
+        let rule = Rule {
+            tool: "Glob".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Glob".to_string(),
+            tool_input: serde_json::json!({"path": "/home/user/project", "pattern": "*.rs"}),
+        };
+        let result = check_rule_with_context(&rule, &input, &[]);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("path:"));
+    }
+
+    #[test]
+    fn test_grep_uses_path_field() {
+        let rule = Rule {
+            tool: "Grep".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Grep".to_string(),
+            tool_input: serde_json::json!({"path": "/home/user/project", "pattern": "fn main"}),
+        };
+        let result = check_rule_with_context(&rule, &input, &[]);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("path:"));
+    }
+
+    #[test]
+    fn test_glob_cwd_fallback_when_no_path() {
+        let rule = Rule {
+            tool: "Glob".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/project").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        // No "path" field in tool_input -- should fall back to cwd
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user/project".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Glob".to_string(),
+            tool_input: serde_json::json!({"pattern": "**/*.rs"}),
+        };
+        let result = check_rule_with_context(&rule, &input, &[]);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("/home/user/project"));
+    }
+
+    #[test]
+    fn test_grep_cwd_fallback_when_no_path() {
+        let rule = Rule {
+            tool: "Grep".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        // No "path" field -- falls back to cwd
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user/project".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Grep".to_string(),
+            tool_input: serde_json::json!({"pattern": "fn main"}),
+        };
+        let result = check_rule_with_context(&rule, &input, &[]);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("/home/user/project"));
+    }
+
+    #[test]
+    fn test_grep_relative_path_absolutized() {
+        let rule = Rule {
+            tool: "Grep".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/project/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        // Relative path "src/lib.rs" should be prepended with cwd
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user/project".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Grep".to_string(),
+            tool_input: serde_json::json!({"path": "src/lib.rs", "pattern": "fn main"}),
+        };
+        let result = check_rule_with_context(&rule, &input, &[]);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("/home/user/project/src/lib.rs"));
+    }
+
+    #[test]
+    fn test_glob_relative_path_absolutized() {
+        let rule = Rule {
+            tool: "Glob".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/project/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        // Relative path "subdir" should be prepended with cwd
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user/project".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Glob".to_string(),
+            tool_input: serde_json::json!({"path": "subdir", "pattern": "*.rs"}),
+        };
+        let result = check_rule_with_context(&rule, &input, &[]);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("/home/user/project/subdir"));
+    }
+
+    #[test]
+    fn test_glob_cwd_fallback_no_match() {
+        let rule = Rule {
+            tool: "Glob".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        // cwd is outside the allowed path -- should NOT match
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/etc".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Glob".to_string(),
+            tool_input: serde_json::json!({"pattern": "*.conf"}),
+        };
+        let result = check_rule_with_context(&rule, &input, &[]);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_glob_explicit_path_overrides_cwd() {
+        let rule = Rule {
+            tool: "Glob".to_string(),
+            tool_regex: None,
+            file_path_regex: Some(Regex::new(r"^/home/user/").unwrap()),
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        // Explicit path provided -- should use it, not cwd
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/etc".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Glob".to_string(),
+            tool_input: serde_json::json!({"path": "/home/user/project", "pattern": "*.rs"}),
+        };
+        let result = check_rule_with_context(&rule, &input, &[]);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_check_subagent_type() {
+        let rule = Rule {
+            tool: "Task".to_string(),
+            tool_regex: None,
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: Some("codebase-analyzer".to_string()),
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+
+        assert!(check_subagent_type(&rule, "codebase-analyzer"));
+        assert!(!check_subagent_type(&rule, "other-agent"));
+    }
+
+    #[test]
+    fn test_agent_missing_subagent_type_fails_closed() {
+        let rule = Rule {
+            tool: "Agent".to_string(),
+            tool_regex: None,
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: None,
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: Some(Regex::new(r"^general-purpose$").unwrap()),
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        // Agent input with NO subagent_type field -- should NOT match (fail closed)
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Agent".to_string(),
+            tool_input: serde_json::json!({"prompt": "do something", "description": "test"}),
+        };
+        let result = check_rule_with_context(&rule, &input, &[]);
+        // Missing subagent_type should not match any rule -- falls to passthrough
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_custom_reason_overrides_auto() {
+        let rule = Rule {
+            tool: "Bash".to_string(),
+            tool_regex: None,
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: Some(Regex::new(r"\$PYTHON\b").unwrap()),
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: Some("Use python3 directly instead of $PYTHON".to_string()),
+            protected_branch_check: None,
+        };
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Bash".to_string(),
+            tool_input: serde_json::json!({"command": "$PYTHON foo.py"}),
+        };
+        let result = check_rules(&[rule], &input);
+        assert!(result.is_some());
+        let reason = result.unwrap();
+        // Custom reason is prepended, auto-generated reason appended
+        assert!(reason.starts_with("Use python3 directly instead of $PYTHON"));
+        assert!(reason.contains("$PYTHON foo.py"));
+    }
+
+    #[test]
+    fn test_no_custom_reason_uses_auto() {
+        let rule = Rule {
+            tool: "Bash".to_string(),
+            tool_regex: None,
+            file_path_regex: None,
+            file_path_exclude_regex: None,
+            command_regex: Some(Regex::new(r"^echo\b").unwrap()),
+            command_exclude_regex: None,
+            subagent_type: None,
+            subagent_type_regex: None,
+            subagent_type_exclude_regex: None,
+            prompt_regex: None,
+            prompt_exclude_regex: None,
+            reason: None,
+            protected_branch_check: None,
+        };
+        let input = HookInput {
+            session_id: "test".to_string(),
+            transcript_path: "/tmp/test".to_string(),
+            cwd: "/home/user".to_string(),
+            hook_event_name: "PreToolUse".to_string(),
+            tool_name: "Bash".to_string(),
+            tool_input: serde_json::json!({"command": "echo hello"}),
+        };
+        let result = check_rules(&[rule], &input);
+        assert!(result.is_some());
+        // Auto-generated reason should contain the command
+        assert!(result.unwrap().contains("echo hello"));
+    }
+}

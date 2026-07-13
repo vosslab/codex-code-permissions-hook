@@ -1,0 +1,244 @@
+#![forbid(unsafe_code)]
+#![warn(clippy::all)]
+#![warn(rust_2018_idioms)]
+#![warn(rust_2024_compatibility)]
+#![warn(deprecated_safe)]
+
+//! Codex command permissions hook library.
+//!
+//! This library provides the core logic for evaluating tool use permissions
+//! based on configurable allow/deny rules with regex pattern matching.
+
+pub mod auditing;
+pub mod config;
+pub mod decomposer;
+pub mod hook_io;
+pub mod matcher;
+
+use anyhow::{Context, Result};
+use std::path::Path;
+
+pub use auditing::Decision;
+pub use config::{Config, Rule};
+pub use hook_io::{HookInput, HookOutput};
+pub use matcher::{check_rules, check_rules_with_protected_branches};
+
+/// Result of processing a hook input against the configured rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookResult {
+    pub decision: Decision,
+    pub reason: Option<String>,
+}
+
+impl HookResult {
+    /// Create an allow result with a reason.
+    pub fn allow(reason: String) -> Self {
+        Self {
+            decision: Decision::Allow,
+            reason: Some(reason),
+        }
+    }
+
+    /// Create a deny result with a reason.
+    pub fn deny(reason: String) -> Self {
+        Self {
+            decision: Decision::Deny,
+            reason: Some(reason),
+        }
+    }
+
+    /// Create a passthrough result (no matching rule).
+    pub fn passthrough() -> Self {
+        Self {
+            decision: Decision::Passthrough,
+            reason: None,
+        }
+    }
+}
+
+/// Process a hook input against the rules from a config file.
+///
+/// Returns the decision (allow/deny/passthrough) and optional reason.
+/// This is the core logic that can be tested without stdin/stdout.
+pub fn process_hook_input(config_path: &Path, input: &HookInput) -> Result<HookResult> {
+    let config = Config::load_from_file(config_path).context("Failed to load configuration")?;
+    process_hook_input_with_config(&config, input)
+}
+
+/// Returns true if the first real token of a Bash leaf is `grep`, `rg`, or
+/// `find` (ignoring leading `command`/`env` words and `VAR=val` prefixes, and
+/// any absolute path to the binary). Used to scope the structural cmd-sub guard
+/// to search commands.
+fn is_search_cmd(leaf: &str) -> bool {
+    for tok in leaf.split_whitespace() {
+        // Skip wrapper words and env-var assignment prefixes.
+        if tok == "command" || tok == "env" || tok.contains('=') {
+            continue;
+        }
+        // Basename of an absolute path (e.g. /usr/bin/grep -> grep).
+        let name = tok.rsplit('/').next().unwrap_or(tok);
+        return matches!(name, "grep" | "rg" | "find");
+    }
+    false
+}
+
+/// Process a hook input against pre-loaded config.
+///
+/// Useful when you want to load the config once and process multiple inputs,
+/// or for testing with custom configs.
+pub fn process_hook_input_with_config(config: &Config, input: &HookInput) -> Result<HookResult> {
+    let (deny_rules, allow_rules) = config.compile_rules().context("Failed to compile rules")?;
+    Ok(process_hook_input_with_rules_and_context(
+        &deny_rules,
+        &allow_rules,
+        config.limits.max_chain_length,
+        input,
+        &config.git_protection.protected_branches,
+    ))
+}
+
+/// Internal version with protected branches context.
+fn process_hook_input_with_rules_and_context(
+    deny_rules: &[Rule],
+    allow_rules: &[Rule],
+    max_chain_length: usize,
+    input: &HookInput,
+    protected_branches: &[String],
+) -> HookResult {
+    // Decompose Bash commands and check each sub-command
+    if input.tool_name == "Bash" {
+        if let Some(command) = input.extract_field("command") {
+            // Check the original full command against deny rules first.
+            // This catches patterns (like heredocs) that the decomposer
+            // strips when extracting leaf commands.
+            if let Some(reason) = check_rules_with_protected_branches(deny_rules, input, protected_branches) {
+                return HookResult::deny(reason);
+            }
+
+            let sub_commands = decomposer::decompose_command(&command);
+
+            // Chain length limit: deny overly complex compound commands
+            if max_chain_length > 0 && sub_commands.len() > max_chain_length {
+                return HookResult::deny(format!(
+                    "Command has {} chained sub-commands (limit: {}). Break into smaller commands.",
+                    sub_commands.len(),
+                    max_chain_length,
+                ));
+            }
+
+            // Deny check: if ANY sub-command matches ANY deny rule, deny everything
+            for sub_cmd in &sub_commands {
+                // Structural cmd-sub guard for search commands. The grep/rg/find
+                // allow rules no longer exclude on the NO_CMD_SUB regex (which is
+                // not single-quote-aware and wrongly blocked quoted patterns like
+                // `grep '`pat' file`). Real, unquoted command substitution inside a
+                // grep/rg/find leaf is denied here instead.
+                if is_search_cmd(sub_cmd) && decomposer::has_active_cmd_sub(sub_cmd) {
+                    return HookResult::deny(
+                        "Command substitution (backtick or `$(...)`) in a grep/rg/find \
+                         command is denied: it hides shell evaluation in a search. Single-quote \
+                         the pattern if the characters are literal (`grep '`foo' file`), or run \
+                         the substitution as a separate, reviewed command."
+                            .to_string(),
+                    );
+                }
+                let synthetic = input.with_command(sub_cmd);
+                if let Some(reason) = check_rules_with_protected_branches(deny_rules, &synthetic, protected_branches) {
+                    return HookResult::deny(reason);
+                }
+            }
+
+            // Allow check: ALL sub-commands must match some allow rule
+            let mut all_reasons = Vec::new();
+            let mut all_allowed = true;
+            for sub_cmd in &sub_commands {
+                let synthetic = input.with_command(sub_cmd);
+                if let Some(reason) = check_rules_with_protected_branches(allow_rules, &synthetic, protected_branches) {
+                    all_reasons.push(reason);
+                } else {
+                    all_allowed = false;
+                    break;
+                }
+            }
+
+            if all_allowed && !sub_commands.is_empty() {
+                let combined = all_reasons.join("; ");
+                return HookResult::allow(combined);
+            }
+
+            return HookResult::passthrough();
+        }
+    }
+
+    // Codex also exposes apply_patch and MCP calls to PreToolUse. Evaluate
+    // those calls directly without Bash decomposition.
+    if let Some(reason) = check_rules_with_protected_branches(deny_rules, input, protected_branches) {
+        return HookResult::deny(reason);
+    }
+    if let Some(reason) = check_rules_with_protected_branches(allow_rules, input, protected_branches) {
+        return HookResult::allow(reason);
+    }
+    HookResult::passthrough()
+}
+
+/// Process a hook input against pre-compiled deny and allow rules.
+///
+/// Use this when rules are already compiled (e.g. from `load_config()`)
+/// to avoid recompiling regex patterns on every call.
+///
+/// For Bash commands, the command string is decomposed into leaf
+/// sub-commands (splitting on `&&`, `||`, `;`, pipes, loops, etc.)
+/// and each sub-command is checked independently:
+///   - Chain limit: if sub-command count exceeds max_chain_length, deny.
+///   - Deny wins: if ANY sub-command matches a deny rule, deny the whole command.
+///   - Allow requires all: ALL sub-commands must match an allow rule.
+///   - Otherwise passthrough.
+pub fn process_hook_input_with_rules(
+    deny_rules: &[Rule],
+    allow_rules: &[Rule],
+    max_chain_length: usize,
+    input: &HookInput,
+) -> HookResult {
+    process_hook_input_with_rules_and_context(deny_rules, allow_rules, max_chain_length, input, &[])
+}
+
+/// Validate a configuration file.
+///
+/// Returns Ok with (deny_rule_count, allow_rule_count) if valid.
+pub fn validate_config(config_path: &Path) -> Result<(usize, usize)> {
+    let config = Config::load_from_file(config_path).context("Failed to load configuration")?;
+    let (deny_rules, allow_rules) = config.compile_rules().context("Failed to compile rules")?;
+    Ok((deny_rules.len(), allow_rules.len()))
+}
+
+/// Load and compile a configuration file.
+///
+/// Returns the Config and compiled rules (deny_rules, allow_rules).
+pub fn load_config(config_path: &Path) -> Result<(Config, Vec<Rule>, Vec<Rule>)> {
+    let config = Config::load_from_file(config_path).context("Failed to load configuration")?;
+    let (deny_rules, allow_rules) = config.compile_rules().context("Failed to compile rules")?;
+    Ok((config, deny_rules, allow_rules))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_search_cmd() {
+        // Bare search commands.
+        assert!(is_search_cmd("grep -n foo src/x"));
+        assert!(is_search_cmd("rg pat src/"));
+        assert!(is_search_cmd("find . -name '*.py'"));
+        // Absolute-path binary resolves by basename.
+        assert!(is_search_cmd("/usr/bin/grep foo src/x"));
+        // Wrapper words and env-var prefixes are skipped.
+        assert!(is_search_cmd("command grep foo src/x"));
+        assert!(is_search_cmd("env grep foo src/x"));
+        assert!(is_search_cmd("LC_ALL=C grep foo src/x"));
+        // Non-search commands.
+        assert!(!is_search_cmd("cat src/x"));
+        assert!(!is_search_cmd("echo hi"));
+        assert!(!is_search_cmd(""));
+    }
+}
