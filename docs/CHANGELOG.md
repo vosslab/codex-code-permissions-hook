@@ -1,0 +1,400 @@
+# Changelog
+
+## 2026-07-13
+
+### Additions and New Features
+
+- Added Codex `PreToolUse` protocol support while preserving the inherited Claude policy backend: nullable `transcript_path`, `Bash` and `apply_patch` command matching, Codex-compatible decision JSON, and empty stdout for passthrough.
+- Added a root Codex TOML that retains the Claude rule layout and adds only Codex-specific patch protection and audit paths.
+- Added `config.toml.example`, a copy-paste global `~/.codex/config.toml` hook definition using the absolute binary path and the stable policy at `~/.config/codex-code-permissions-hook.toml`.
+
+### Fixes and Maintenance
+
+- Fixed the executable's compiled-rule path to carry configured protected branches into runtime evaluation. Previously, the CLI loaded the branch list but discarded it when processing input.
+- Fixed the Codex secret-file patch rule to match real multi-line `apply_patch` headers, including nested `.env` and `.secret` paths.
+- Made the decision runner test the Codex profile and locate the repository from the script path instead of Git state. `config_test.sh` now uses the same filesystem-only repository discovery.
+- Made the decision runner report nonzero hook subprocess exits instead of misclassifying empty stdout from a failed process as policy passthrough.
+- Restored the inherited design-passthrough audit filtering without changing Codex behavior.
+- Applied standard Rust formatting and resolved strict Clippy warnings in the copied backend and tests.
+
+### Developer Tests and Notes
+
+- The Codex profile passes all 1,265 command-decision fixtures.
+- Rust unit and integration suites pass, including Codex protocol, patch protection, and compiled protected-branch runtime coverage; `cargo clippy --all-targets -- -D warnings` is clean.
+- Direct Codex stdin/stdout smoke checks confirm valid allow and deny JSON and zero-byte passthrough output.
+
+## 2026-06-30
+
+### Additions and New Features
+
+- Added read-only inspector allows (both configs): `magick identify`/`magick -list` at any path (steered around the `/tmp`-scoped `magick` convert/transform rule, which still gates write forms), `xmllint` without an output flag, `strings`, `fc-list`, and `npm pkg get` (`npm pkg set|delete` stay passthrough).
+- Added a workspace-absolute built-binary allow (both configs), complementing the existing CWD-relative allow: a freshly built first-party binary under `~/<workspace>/.../.build/...` or `target/(debug|release)/...` auto-allows when referenced by its full workspace path, not just relative to cwd. Bounded by `${NO_TRAVERSAL}` and `${NO_CMD_SUB}`; absolute paths outside the workspace stay passthrough.
+- Added `pandoc`, `soffice`, and `pdftoppm` to the `/tmp`-scoped media/doc-converter group (`TMP_SCOPED_CMDS`, both configs). This is a partial fix: it auto-allows the all-paths-under-`/tmp` case, but the common shape "workspace input, `/tmp` output" (for example `soffice --convert-to ... --outdir /tmp <workspace file>.xlsx`) still passes through -- separating input path from output path needs the already-deferred Rust path-zone work (see 2026-06-23), not pure regex.
+- Added a `screenshot` allow (both configs) for the easy-screenshot CLI used by the screenshot-docs skill.
+- Broadened the local dev-loop toolchains (both configs), per the user's stated trust principles (allow network info-gathering, local dev-loop execution, and repo-local script execution; keep installs and remote-exec gated):
+  - `node`: replaced the narrow file-leaf allow with a broad `^node\b` allow that excludes inline eval (`-e`/`--eval`) and command substitution. This auto-allows directory-form test runs (`node --import tsx --test tests/`) and flag combinations the old leaf rule missed (`--watch`, etc).
+  - `npm`: replaced the narrow allow with a broad `^npm\b` allow that excludes installs/uninstalls (`install`, `i`, `ci`, `add`, `update`, `upgrade`, `uninstall`, `remove`, `rm`, `prune`, `dedupe`), `exec`/`x`, `publish`/`unpublish`, auth (`login`, `logout`, `adduser`, `owner`, `deprecate`, `token`, `star`, `unstar`), `pkg set|delete`, and `audit fix`. This blesses the same trust already granted to `./script.sh` and `node script.js` -- running first-party code from the working tree (`npm run`, `npm test`) -- while installs and publishing stay gated. The dedicated `npm install --save-dev typescript` allow is unchanged.
+  - `npx`: expanded the package whitelist with `vitest`, `jest`, `vite`, `http-server`, `serve`, `tailwindcss`, `@biomejs/biome`, `nodemon`, `concurrently`. Unknown packages still require approval (npx fetches and executes, beyond info-gathering, so this stays a whitelist, not a broad allow).
+  - `rustc`: new allow for local compilation, mirroring the existing broad `cargo`/`swift` allows.
+  - `rustup`: new read-only allow for `show`, `which`, `--version`, `component list`, `toolchain list`, `target list`. Mutating verbs (`install`, `default`, `override`, `update`, `toolchain install`) are absent, so installs stay gated.
+
+### Behavior or Interface Changes
+
+- **`git tag` and `git init` are now denied** (both configs, all invocation-prefix forms: `-C`, `-c`, `--no-pager`), steered with positive reasons ("Ask the user to list or create tags" / "Run repository bootstrap from a dedicated setup script"). `git tag --list` is denied too -- the regex anchors on the `tag` subcommand, so read-only listing is not carved out. These are explicit user decisions, not derived from the passthrough assessment.
+
+### Fixes and Maintenance
+
+- Fixed an inline-eval deny hole in `node -e`/`--eval`, `python -c`, and `swift -e`/`--eval` (both configs): the flag-skip clause in each deny regex previously only consumed dash-prefixed tokens (`(-\S+\s+)*`), so a value-taking flag followed by a bare value (for example `node --import tsx -e "..."`) stalled the match before reaching `-e` and leaked to passthrough instead of denying. Each deny regex now has a clause that consumes known value-taking flags together with their argument (`--import`/`--loader`/`--require`/`--experimental-loader`/`-r` for node; `-X`/`-W`/`--check-hash-based-pycs` for python; `-I`/`-L`/`-D`/`-framework`/`-Xcc`/`-Xswiftc`/`--package-path` for swift) before falling back to the bare dash-token skip. `node script.js -e foo` (a real file argument before `-e`) still allows -- the design intent (deny inline code execution, allow running a file) is unchanged, only the leak is closed.
+- Renamed the upstream-origin username `korny` to `<upstream-user>` in `tools/run_command_decisions.py` and `tests/README.md` so tracked files do not carry a real third-party account name.
+- Updated `Cargo.toml` `authors` to credit the current maintainer alongside the original upstream author.
+
+### Decisions and Failures
+
+- Passthrough-log assessment driving this batch: 875 JSONL records logged 2026-06-16 through 2026-06-30 in `/tmp/claude-passthrough.json`. 596 carried `cwd=/Users/<upstream-user>/...` -- the upstream fork's bundled synthetic `decision-runner` fixture traffic from running `tools/run_command_decisions.py`/`config_test.sh` -- and were excluded as non-signal. The remaining vosslab-cwd records split into ~209 dated 2026-06-16/06-23 that predate the rules added on those exact days (already handled by prior changelog entries) and the real current signal: real usage after the 2026-06-23 rule batch.
+- Before/after re-evaluation (verification step): the live `/tmp` passthrough log rotates to a `.1` backup at a size threshold, so the original assessment's record count was not fully recoverable from the live file alone by the time this entry was written; reconstructing from the current log plus its `.1` rotation backup (deduplicated by timestamp+cwd+command) yielded 52 post-06-24 vosslab Bash records, not the 76 cited during planning -- the discrepancy is log rotation/growth between planning and closing, not a methodology change. Re-evaluating those 52 against the new live config: **23 now allow** (most common shapes: `xmllint --format`, `strings`, `node --import tsx --test tests/` piped to a filter, `npm pkg get scripts`, `magick -list font`, `fc-list`, `pdftoppm`, `screenshot --help`), **8 now deny** (the inline-eval deny-hole fix catching `node --import tsx -e "..."`/`--eval`, plus the new `git tag --list` and `git init` denies), and **21 still passthrough** (mostly `npm install` runs -- gated by policy -- a `pandoc` workspace-input case the partial `/tmp` fix does not cover, and longer multi-leaf compound commands such as `git -C <path> log --oneline | wc -l` and `chmod +x ... && ./script.sh` that fall outside this batch's scope).
+- `pandoc`/`soffice`/`pdftoppm` workspace-input + `/tmp`-output stays a known, documented limitation rather than an over-allow: pure regex cannot separate "this argument is the input path" from "this argument is the output path" without lookahead the hook's regex engine does not have. Deferred to the same future Rust path-zone task noted on 2026-06-23.
+- `npm`/`npx`/`cargo`/`rustup` installs, `curl`/`wget`/`deno run <url>` remote-exec, and `$(...)` command-substitution forms keep their current passthrough/deny behavior by explicit user decision -- this batch adds no new download or remote-code-execution allow.
+
+### Developer Tests and Notes
+
+- Verified via `./config_test.sh` (cargo build/test plus `tools/run_command_decisions.py` against both the live config and `example.toml`): `OVERALL: ALL TESTS PASSED (passed=2462, skipped=0)`, cargo test 0 failed.
+- Before/after evidence generated with a throwaway `_temp_beforeafter.py` script that re-sent each extracted post-06-24 vosslab Bash record to the built release hook binary (`target/release/claude-code-permissions-hook run --config ~/.config/claude-code-permissions-hook.toml`), the same invocation shape `tools/run_command_decisions.py` uses for fixture rows.
+
+## 2026-06-26
+
+### Additions and New Features
+
+- Added a "Guide philosophy" section near the top of `docs/CLAUDE_HOOK_USAGE_GUIDE.md` as a north-star for migrating the guide from an exhaustive command catalog toward principles plus recovery. It states that the TOML config is the source of truth for exact patterns and deny `reason` text (which the agent sees live at runtime), that per-repo-type and single-tool specifics belong in the config, and that older enumerated sections get trimmed toward this model as they are touched. Phrased positively per the small-LM prompting guidance.
+
+### Fixes and Maintenance
+
+- Trimmed fat in the `find` deny section of the hook guide: condensed the exhaustive "Not in this pass" predicate dump to a short representative list, dropped the residual-passthrough edge-case paragraph, and shortened the niche SolidJS-route quoted-segment example.
+- Trimmed redundant `**Why:**` rationale prose from the heaviest deny sections (`rm`, `cat`/`head`/`tail`, `git restore .`/`git checkout -- .`) since the hook already returns its `reason` to the agent at deny time; kept the `**Blocked:**` examples and recovery one-liners. Also condensed the nine-line `git restore .` blocked-example dump to a few representatives.
+
+### Removals and Deprecations
+
+- Removed the `perl` on `.pg`/`.pgml` files section from `docs/CLAUDE_HOOK_USAGE_GUIDE.md` entirely (heading, steer text, and Blocked examples). It documented a deny rule that only matters in a single niche repo type (WeBWorK/PGML problem authoring) and named the `/webwork-writer` skill; the hook guide is a general best-practices doc and the config carries per-repo-type rules. The `.pg`/`.pgml` perl deny still lives in the TOML configs; the guide now omits it. The universal `source_me.sh`, `~/nsh/`, and `~/.claude/` references stay (they apply to every repo).
+
+## 2026-06-23
+
+### Additions and New Features
+
+- Added a built-binary allow rule (both configs) so the agent can run a freshly-built first-party binary from the current working directory without a prompt: `command_regex = "^(\\./)?(${BUILD_OUT})"` with new variable `BUILD_OUT = "\\.build/|target/(?:debug|release)/"` (SwiftPM `.build/`, Cargo `target/debug|release/`). CWD-relative only; absolute build paths stay passthrough, `..` trips `${NO_TRAVERSAL}`, and a `$(...)` argument fails `${NO_CMD_SUB}` and falls to passthrough. This was the dominant audit gap: 51 of 179 real passthroughs (28%) were running just-built `.build/` binaries in a build/run/screenshot loop.
+- Added a `sips` write-form allow scoped to `/tmp` (both configs), mirroring the `TMP_SCOPED_CMDS` rule shape: crop/resample/convert (`-c`, `-z`, `-s`, `--out`) auto-allow when every path is under `/tmp`. The existing `sips -g` read rule is unchanged.
+- Added an `ffmpeg` decode-only validation allow (both configs): `ffmpeg ... -f null -` (or `-f null /dev/null`) auto-allows regardless of input path because it writes nothing. Real file outputs stay gated by the `/tmp`-scoped rule.
+- Added read-only inspection allows (both configs): `plutil -lint`, `plutil -convert ... -o -` (stdout only), and verb-scoped `diskutil (list|info)`. `diskutil` uses an explicit read-verb allow-list, not an exclude-list, so destructive verbs (`eraseDisk`, `partitionDisk`, `unmountDisk`, ...) stay passthrough even if Apple adds new ones.
+
+### Behavior or Interface Changes
+
+- **`kill`, `pkill`, and `killall` are now denied** (both configs), steered with a positive message toward graceful self-exit plus `pgrep`: "Let the program exit on its own. For an app under test, launch it with a concrete timeout such as --auto-exit=3. To find a running instance, use `pgrep -l <app-name>` and let the user stop it." `pkill` was previously allowed via `PROC_CMDS`; it was removed from that variable (`PROC_CMDS = "pgrep|ps|sleep|timeout|wait"`) so the allow groups stay honest. `pgrep` remains allowed.
+- **`perl` in-place edits (`-i` flag) are now denied** (both configs), steered to the Edit tool. The regex matches bare `-i`, backup-suffix `-i.bak`, and `-i` clustered with loop/print switches (`-pi`, `-0pi`, `-ip`); a switch-letter class keeps `-MTime::HiRes`, uppercase `-I/inc`, plain loop flags (`-pe`, `-ne`), and `perl script.pl` from matching.
+- **`osascript` is now denied** (both configs), steered to asking the user or using a screenshot helper. AppleScript can drive and inspect arbitrary apps.
+- **`screencapture` with command substitution is now denied** (both configs); plain `screencapture` stays allowed via `SYS_CMDS`. Steered to looking up the window id in a separate reviewed step.
+- **The `claude` CLI in dispatch mode (`-p`/`--print`) is now denied** (both configs), steered to the Agent tool. CLI dispatch spawns an unsupervised nested agent the hook cannot observe and risks recursion.
+
+### Fixes and Maintenance
+
+- Added ~55 fixtures to `tests/command_decisions.tsv` covering all new rules with near-miss negatives (built-binary cmd-sub/absolute/`..` passthrough, sips `/tmp` vs non-`/tmp`, ffmpeg `-f null` vs transcode, plutil stdout vs file write, diskutil read vs destructive verbs, perl in-place vs `-MTime::HiRes`, kill/pkill/killall vs pgrep). Updated stale `kill`/`pkill` fixtures from `allow`/`passthrough` to `deny`. Full suite green against both configs (`./config_test.sh`, 2386 pass).
+
+### Decisions and Failures
+
+- 2026-06-23 passthrough audit (339 log records). 160 were synthetic `decision-runner` fixtures and excluded; the 179 real records spanned 7 repos, ~166 from `swift-usb-imager` GUI development. The single dominant gap was running just-built `.build/` binaries (51 records); fixing that one rule removes most of the loop's downstream flailing (process-kill juggling, toolchain archaeology).
+- Built-binary allow keyed on the build-output prefix (`.build/`, `target/debug|release/`) rather than the brittle arch-specific path, so future arches and Rust outputs ride along. CWD-relative only to keep the trust boundary at "an artifact this repo just compiled."
+- `diskutil` scoped to an explicit read-verb allow-list (user decision): the destructive verbs live in the same binary, and in a USB-imager repo they are the live-fire surface, so a broad `^diskutil` allow was rejected.
+- Deny reasons use positive ("Do X / Use Y") phrasing with the unwanted tool name omitted, because small models can invert "do not X" into doing X. The kill steer gives a concrete `--auto-exit=3` example rather than a `--auto-exit=N` placeholder, which a small model might pass literally.
+- Deferred to a future Rust path-zone task (user decision): (1) `ffmpeg` transcode reading an absolute-path input while writing to `/tmp`, and (2) extending the whole `TMP_SCOPED` media group to write to `/tmp` OR the user workspace. Both need to separate input from output (or test "all paths in a safe zone"), which pure regex cannot express without lookahead (the Rust regex engine has none); a regex fallback would leave a residual over-allow. Until then those stay passthrough.
+
+### Developer Tests and Notes
+
+- Verified via `./config_test.sh` (cargo build/test + `run_command_decisions.py` against both live and example configs) and focused `run_command_decisions.py` runs for each new rule group. Pre-existing `cargo clippy -- -D warnings` warnings in `src/` are unrelated to this config-only change (no Rust files were modified).
+
+## 2026-06-16
+
+### Additions and New Features
+
+- Added a `swift` allow rule (both configs) modeled on the `^cargo\b` allow: the whole SwiftPM dev loop auto-allows (`swift build`, `swift test`, `swift run`, `swift package <sub>`, `swift --version`). `command_exclude_regex` excludes inline-eval (`-e`/`--eval`) and the registry-mutating `package-registry login|logout|set` subcommands. Like `cargo build`, `swift build`/`swift test` fetch dependencies over the network -- the same accepted trade-off.
+- Added a `sips -g` read-only allow rule (both configs): `sips -g <prop> ...` image-metadata queries auto-allow regardless of path because the `-g`/`--getProperty` form never writes. Any write/convert flag (`-s`, `-z`, `--resample*`, `--crop*`, `--pad*`, `-r`, `-f`, `-o`/`--out`, `-d`/`--delete*`, `-i`/`--addIcon`, `-m`/`--matchTo*`, `-e`/`--embedProfile`) disqualifies the leaf, leaving it at passthrough. For transforms, `magick` in `/tmp` is the steer.
+
+### Behavior or Interface Changes
+
+- **`swift -e` / `swift --eval` inline code is now denied** (both configs), steered to a `_temp.swift` file or running `swift build`/`swift test` directly. Same rule shape as `python -c` and `node -e` (`^${TOOL_PREFIX}${TOOL_PATH}swift\s+(-\S+\s+)*(-e|--eval)\b`), covering bare, flag-prefixed, `command`/`env`, and absolute-path forms.
+- **`xcode-select` is now denied** (both configs), steered to running `swift` directly. In the audit it appeared only as toolchain archaeology (`xcode-select -p`) while a `swift test` was stalling. `xcrun` is unaffected (it stays in `SYS_CMDS`); the deny anchors `xcode-select\b` so it never matches `xcrun`.
+
+### Fixes and Maintenance
+
+- Added 38 swift, 8 xcode-select, and 10 sips fixtures (plus xcrun negative guards) to `tests/command_decisions.tsv`, including the real chained shapes from the audit (`cd /tmp/x && swift test 2>&1; echo "EXIT: $?"`). All green against both configs.
+
+### Decisions and Failures
+
+- Root-cause framing from the 2026-06-16 passthrough audit (43 records, 2 sessions): session B (`swift-usb-imager`, 39 records) was not 39 separate gaps -- it was one gap (no `swift` rule) plus downstream flailing. With `swift build`/`swift test` stalling, the agent did toolchain archaeology (`swift -e 'import XCTest'`, `otool -L .../Testing.framework`, `xcrun --find xctest`, `echo "EXIT: $?"`, `|| true`). Fixing the design (allow `swift`) removes the archaeology, so `otool`/`xcodebuild`/`swift -e` were deliberately NOT allowlisted (allowlisting debugging artifacts would bless the wrong behavior).
+- Chose a broad `^swift\b` allow + small exclude (mirroring `^cargo\b`) over an enumerated subcommand allowlist: the enumerated form is more precise but higher-maintenance and would re-stall the next legitimate subcommand.
+- `xcode-select` denied rather than allowlisted (user decision): it is a once-per-machine probe, not dev-loop work, and the audit showed it only as flailing. A `xcode-select -p; xcrun ...` chain denies as a whole because one leaf denies.
+- `sips` scoped to the read-only `-g` query form only (user decision): write/convert forms stay passthrough. `magick` was rejected as a steer for metadata reads -- it is `/tmp`-scoped (would also stall on the `~/Documents/ScreenShots` paths in the audit), an external dependency, and write-capable; native `sips -g` is the cleaner read-only path.
+
+### Developer Tests and Notes
+
+- Verified via `./config_test.sh` (cargo build --release + cargo test + `run_command_decisions.py` against BOTH live and example configs) and focused `run_command_decisions.py swift|xcode-select|sips|xcrun` runs.
+
+## 2026-06-03
+
+### Additions and New Features
+
+- Added `has_active_cmd_sub()` to `src/decomposer.rs`: a single-quote / backslash-aware scanner (mirrors `extract_command_substitutions`) that returns true only for an UNQUOTED, unescaped backtick or `$(`. A substitution character inside `'...'` is inert and returns false. Unit test `test_has_active_cmd_sub` covers quoted/unquoted/escaped/`${}` cases.
+- Added a structural command-substitution guard for search commands in `src/lib.rs` (`is_search_cmd` + `has_active_cmd_sub`): a `grep`/`rg`/`find` leaf with real (unquoted) command substitution is denied with a steering message; quoted substitution characters no longer block. Scoped to search commands (user decision, passthrough audit 2026-06-03) to bound blast radius rather than replacing `${NO_CMD_SUB}` across all ~30 rules.
+- Added a dedicated `grep|rg` allow rule (both configs) with NO `command_exclude_regex`, bare-name anchored `^(grep|rg)\b` to mirror the `SAFE_CMDS` allow shape. The shared `SAFE_CMDS` allow still excludes `${NO_CMD_SUB}` (not single-quote-aware); this rule re-allows searches whose PATTERN holds a quoted backtick/`$(`/`${`. Out-of-zone paths are still denied first by the grep/rg path deny; real cmd-sub by the structural guard.
+- `tools/run_command_decisions.py` now reprints every mismatch after the FAILURE banner, so failures are visible at the end of a run without scrolling back through the OK lines.
+
+### Behavior or Interface Changes
+
+- `grep`/`rg` with a literal backtick, `$(`, or `${` inside a single-quoted PATTERN now AUTO-ALLOWS (was passthrough): `grep -n '`references/' src/x`, `grep '${.*}__${' src/main.ts`. This completes the quote-aware backtick handling deferred on 2026-05-29.
+- `find` with quoted or backslash-escaped path SEGMENTS now auto-allows: `FIND_SAFE_PATH_ARG` segment char class extended from `[A-Za-z0-9_./-]` to include `'"\()` (both configs), so SolidJS-style route dirs named `(0)concepts` match whether written `'(0)concepts'` or `\(0\)concepts`. `..` traversal stays denied.
+- Clarified that grep/rg flags (`-n`, `-rn`, `-r`, `--include=`) never block; the prior passthroughs were the backtick-in-pattern issue, not flags.
+
+### Fixes and Maintenance
+
+- Removed `${NO_CMD_SUB}` from the `find` allow exclude and the `find` traversal/cmd-sub deny (both configs); the structural guard now owns cmd-sub denial for find, so quoted substitution chars in a find path no longer false-deny.
+- Added 12 fixtures to `tests/command_decisions.tsv`: grep flag allows, single-quoted backtick/`${}` allows, quoted/escaped-paren find path allows, grouping `\( ... \)`, plus negative guards (unquoted backtick/`$(` deny, `..` traversal deny). Full suite green at 2202 passing.
+- Post-review fixes (audit-code-reviewer): `has_active_cmd_sub` narrowed `pub` -> `pub(crate)` (only intra-crate caller); added `test_is_search_cmd` unit test; corrected a stale A1 comment in both configs that still claimed `${NO_CMD_SUB}` was in the find allow exclude; fixed broken backtick code spans and a now-inaccurate "command substitution is blocked" blanket in `docs/CLAUDE_HOOK_USAGE_GUIDE.md`; annotated the grep/rg-shadows-SAFE_CMDS ordering near `SEARCH_CMDS` in both configs.
+
+### Removals and Deprecations
+
+- Trimmed redundancy from `docs/CLAUDE_HOOK_USAGE_GUIDE.md` (which loads into `CLAUDE.md` context every session and was near the 40000-char `tests/test_usage_guide_size.py` cap). Replaced the "Common patterns" Wrong/Right table (a full restatement of denies documented in detail above) with a short rules-of-thumb pointer, deduplicated the find "Not in this pass" predicate list (it appeared twice), and tightened find-section prose. No rule information lost; net ~1.6 KB smaller, leaving real headroom under the cap.
+
+### Decisions and Failures
+
+- Kept the cmd-sub fix SCOPED to `grep`/`rg`/`find` rather than generalizing `has_active_cmd_sub` to replace `${NO_CMD_SUB}` on all Bash rules (user decision). The general form is cleaner (DRY, no `is_search_cmd` special case) but would flip non-search `$(...)` cases (e.g. `echo $(date)`) from passthrough to deny and require a full torture-suite re-baseline. Search commands are the only place the false positive bites, so the scoped fix is the long-term-cheaper choice for now.
+- Regression caught during the run: the first draft of the new grep allow used `^${TOOL_PREFIX}${TOOL_PATH}(grep|rg)\b`, which matched the `command ` wrapper and flipped `command grep ... ` from passthrough to allow. Fixed by anchoring bare `^(grep|rg)\b`, matching the existing `SAFE_CMDS` allow shape. The end-of-run failure summary (added this day) surfaced it immediately.
+- Passthrough audit of `/tmp/claude-passthrough.json` (6 records) drove these changes; all 6 were legitimate read-only searches in safe zones (workspace, `~/.claude/plans`, relative), stalling on the two rule gaps above. None malicious.
+
+### Developer Tests and Notes
+
+- Verified via `./config_test.sh` (cargo build + cargo test + `run_command_decisions.py` against BOTH live and example configs): 86 lib tests + 2202 fixture decisions pass. New `test_has_active_cmd_sub` lives under `cargo test --lib`.
+
+## 2026-05-29
+
+### Additions and New Features
+
+- Added `pdfinfo` to `INSPECT_CMDS` (both configs). The poppler page-count/metadata tool is read-only and now auto-allowed alongside `pdftotext`. A missing binary fails loudly with `command not found`, which is correct feedback; the hook gates permission, not install state.
+- Added a `NO_BACKTICK = "`"` TOML variable (both configs) and a new allow rule for `echo|printf|ps|pgrep` that excludes only `NO_BACKTICK` (not `${NO_CMD_SUB}`). These four commands cannot mutate the filesystem or read sensitive files based on a substituted value, and the decomposer already extracts every `$(...)` inner command as its own leaf for independent deny/allow evaluation (deny wins). Result: `echo "TAG_$(date +%s)"`, `printf '%s' "$(grep -c PAT f)"`, and `ps -p $(pgrep -f x)` now auto-allow instead of stalling at passthrough, while a dangerous inner like `$(rm -rf /important)` is still denied via the extracted leaf. Backticks stay blocked (the decomposer does not extract backtick substitutions).
+- Extended the `node` allow rule (both configs): added `.mts`/`.cts` script extensions and a quoted-glob path argument, so `node --import tsx --test 'tests/test_*.mjs'` (node:test glob form) and `node x.mts` auto-allow.
+- Extended the `npx` allow rule (both configs): optional global flags `--prefix <path>` / `-p <path>` / `--package <pkg>` / `--yes`/`-y` / `--no-install` / `--no` may precede the whitelisted package, covering monorepo invocations like `npx --prefix /path/to/project tsc --version`.
+- Extended the `git` allow rule (both configs): `-c <key=val>` and `--no-pager` global flags are now skipped before the safe subcommand (previously only `-C <path>` was), so `git -c status.renames=true status` and `git --no-pager diff` auto-allow.
+
+### Behavior or Interface Changes
+
+- **`git rebase` is now denied on ALL branches** (both configs), not just protected ones. Removed `protected_branch_check = true` from the rebase deny and added `command_exclude_regex = "\\brebase\\s+--abort\\b"` so only the abort escape hatch survives (as passthrough). Rationale (user decision, passthrough audit 2026-05-29): humans run rebases; agents stage work on an `agent/<task>` branch and let the human rebase or prepare a merge. `rebase --continue` was already denied unconditionally.
+- **`nohup` is now denied** (both configs), steered to the Bash tool's `run_in_background` mode plus the Monitor tool. `nohup ... &` orphans processes outside the harness's tracking and drives the hand-rolled PID juggling (`echo $!`, `ps/pgrep` polling, bare `until`-loops) seen across the audit log.
+- **Absolute `/usr/bin/time` and `/bin/time` are now denied** (both configs), steered to the bare `time` keyword. The decomposer strips a leading `time` keyword, so `time node app.mjs` already evaluates the inner `node app.mjs` and auto-allows; the absolute binary path was a workaround that bypassed leaf evaluation.
+- **`until` loops are now denied** alongside `while` (both configs). until-poll loops are the hand-rolled background-waiting that the Monitor tool / `run_in_background` mode replace.
+
+### Fixes and Maintenance
+
+- Fixed a `printf`-redirect deny leak (both configs). The old body gate `[^|;&]*` stopped scanning at the first `|` (markdown table rows) or `&` (HTML entities like `&amp;`, `&alpha;`) in the printf content, so large markdown audit reports written via `printf '...' > file.md` leaked through to passthrough. New regex `(?s)^...printf\b.*(?:(?:^|\s)>>?\s*[^\s>]|\|\s*tee\b)`: `(?s).*` allows any body char incl newlines; the redirect operator is anchored at start-of-leaf or after whitespace so a literal arrow (`a->b`) in stdout content does not false-positive. Tradeoff: a printf printing literal " > " text to stdout is denied (steered to Write/echo) -- rare and acceptable.
+- Fixed a `for`/`while` loop deny false-positive (both configs). The old keyword-only anchors (`(^|[|;&]\s*|\bdo\s+)for\b` and `...while\b`) matched a `|for` / `|while` sequence INSIDE a quoted grep pattern (e.g. `grep -E 'until |for ' file`), wrongly denying a legitimate file search. The denies now require real loop SYNTAX: `for\s+(\w+\s+in\b|\(\()` (for-NAME-in or C-style `for ((`) and `(while|until)\b.*?\bdo\b` (keyword + condition + `do`). Real loops still deny; quoted search patterns no longer false-match.
+- Added 30+ fixtures to `tests/command_decisions.tsv` covering all of the above: `/usr/bin/time` deny + bare `time` allow, node quoted-glob/`.mts`/`.cts`, npx global flags, pdfinfo, echo/printf/ps/pgrep `$()` allow, dangerous-inner deny, printf markdown-redirect deny, git `-c`/`--no-pager` allow, nohup deny, loop quoted-pattern false-positive guard, real-loop denies, and git rebase deny/abort.
+
+### Decisions and Failures
+
+- Backtick-in-grep (e.g. `grep -c "...py`" file.md`) intentionally stays **passthrough**, not allow: the pattern contains a literal backtick, the decomposer cannot extract/verify backtick substitutions, so the backtick guard keeps it from auto-allowing. Passthrough = one user approval (safe). A real fix needs quote-aware backtick handling in `src/decomposer.rs` -- a larger, separate change.
+- Passthrough audit of `/tmp/claude-passthrough.json` (38 records) drove these changes. All logged passthroughs were legitimate agent work stalling on rule gaps (none malicious); two were correct by-design passthroughs (`npm install`, kept). Dogfooding note: during the audit the assistant's own `grep ... 'for '` and `'while'` patterns were false-denied by the loop rules, which surfaced the bug now fixed.
+
+### Developer Tests and Notes
+
+- `tools/run_command_decisions.py` runs 2178 rows green across both configs (live `~/.config/claude-code-permissions-hook.toml` and `example.toml`); `cargo test` green (decomposer/matcher/protected-branch suites).
+
+## 2026-05-28
+
+### Additions and New Features
+
+- Added `tests/test_usage_guide_size.py`, a size guard that fails if `docs/CLAUDE_HOOK_USAGE_GUIDE.md` reaches 40000 characters (currently 38087). The guide is injected into agent context, so it must stay compact; trim or compress it if the test trips.
+
+### Behavior or Interface Changes
+
+- **Policy change: `grep`/`rg` against a file path is now ALLOWED in safe path zones, denied only when the path escapes them.** Rationale: Anthropic removed the `Grep()` tool from this agent context (confirmed 2026-05-16), so Bash `grep`/`rg` is now the primary file-search path; the old blanket file-arg deny created friction with no available tool to steer to, and the user wants agents to search files directly rather than route through `git ls-files`. New shape in both `example.toml` and the live `~/.config/claude-code-permissions-hook.toml`: the grep/rg file-arg deny regex changed from `(grep|egrep|fgrep|rg)\b[^>]*/` (deny on any path-shaped arg) to `(grep|rg)\b[^>]*\s(/|~|\.\.)` with `command_exclude_regex = "\\s(${SAFE_ABS_ZONES})(?:/|\\s|$)"`. Effect: relative/CWD paths (`grep -n foo src/main.rs`, `rg pat docs/`) fall through to the `SAFE_CMDS` allow; absolute paths inside the workspace (`~/<ws>/...`, `/Users/<me>/<ws>/...`, `$HOME/<ws>/...`), `/tmp`, `/private/tmp`, and the narrow `~/.claude/{agents,commands,skills,plugins,plans,projects}` subtrees are excluded from the deny and allowed; out-of-zone absolute paths (`/etc/...`, `/usr/...`, arbitrary non-workspace `/Users/...`), bare `~`, and `..` traversal stay denied (unbounded-scan / context-flood guard).
+- Added a named `SAFE_ABS_ZONES` TOML variable (the absolute branches of `FIND_SAFE_PATH_ARG`, minus the bare-relative branch) so the grep/rg exclude reads `\\s(${SAFE_ABS_ZONES})(?:/|\\s|$)` instead of an inline 200-char alternation. Reused identically in both configs (parameterized by `WORKSPACE_ROOT`, so reason-string parity holds).
+- `egrep`/`fgrep` are now denied for the file-path form on their own rule (deprecated; steer to `grep -E` / `grep -F`); they no longer ride the grep/rg deny. Absolute-binary forms (`/usr/bin/grep`, `/opt/homebrew/bin/rg`) keep their own deny + PATH-discipline steer regardless of the target path. `git grep`, `pcregrep`/`ack`/`ag` (file path), and `less <file>` denies are unchanged.
+
+### Fixes and Maintenance
+
+- Rewrote the `### grep/rg with file paths` section of [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md) to document the new allow-in-safe-zones policy (Allowed: relative, workspace, `/tmp`, `~/.claude` subtrees; Blocked: out-of-zone absolute, bare `~`, `..`, abs-binary, `egrep`/`fgrep`). Updated the `## Bash-side reference` preamble + grep row, the `### Pipe-only commands` table (dropped grep/rg, kept egrep/fgrep), the `## Best practices` and `## Common patterns` search guidance (search directly with `grep`/`rg` on a relative path; Grep tool unavailable), and the `Search files` / `Tool name as Bash` rows.
+- Updated `tests/command_decisions.tsv`: flipped 11 stale rows from `deny` to `allow`/`passthrough` under the new policy (`/tmp` and relative grep/rg, `env grep` relative; `command grep` -> passthrough), and added explicit new-behavior fixtures -- relative allow (`grep -n foo src/main.ts`, `rg pattern docs/`), out-of-zone deny (`grep foo /etc/hosts`, `rg pattern /usr/lib/x`), traversal/home deny (`grep foo ../secrets.txt`, `rg foo ~/Documents/x`), and per-config 4-col workspace-absolute + `~/.claude` allow rows. Decision corpus runs 2112 passing rows across both configs; full `pytest tests/` 207 green.
+- Corrected the grep/rg recovery guidance in [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md). The `### grep/rg with file paths` section previously listed two distinct recovery paths joined by a semicolon ("`git ls-files` then Read tool on targets; piped `grep`/`rg` on bounded stdout"), which an agent merged into the wrong idiom `git ls-files | grep` (filters filenames, not contents) and the overstated claim "pipeline `... | grep` always OK". Rewrote the section to split recovery by intent: content search across many files via `git ls-files <pathspec> | xargs grep PAT` (the whitelisted `xargs grep|egrep|fgrep|rg` pipeline leaf, allowed end-to-end), file inspection via `git ls-files` + Read, broad search via `_temp.py`. Added the explicit caveats that `... | grep pat` filters stdout (not a file search), `git ls-files | grep` filters filenames, `... | grep pat file` (file arg) is still denied, and a denied producer denies the whole chain.
+- Documented three grep-adjacent rules that shipped 2026-05-15 (live in `example.toml`) but were missing from the guide: the `git ls-files | xargs grep PAT` pipeline-leaf allow (`example.toml:1075-1089`); the `pcregrep`/`ack`/`ag` file-path deny mirroring grep/rg (`example.toml:667-672`); and the `less <file>` deny routing to the Read tool (`example.toml:660-665`). Folded the latter two into the grep/rg Blocked block.
+- Aligned the top `## Bash-side reference` grep row with the new `xargs grep` content-search recovery so the summary table no longer re-seeds the filename-vs-contents confusion. Collapsed the duplicated recovery paragraph in `### git grep` to a cross-link anchor (`#grep-recovery`). Compressed the four-paragraph header preamble to a single paragraph. Updated the stale `_Last updated_` stamp from 2026-05-21 to 2026-05-29 02:20 UTC (true UTC edit time; local date 2026-05-28).
+
+### Developer Tests and Notes
+
+- `pytest tests/test_markdown_links.py tests/test_ascii_compliance.py` runs 2/2 green after the doc edits (new `#grep-recovery` anchor and cross-link verified).
+- Full `pytest tests/` green (213, including the new size guard); `tools/run_command_decisions.py` 2112 rows pass across both configs; `tests/test_toml_parse.py` parity holds after the `SAFE_ABS_ZONES` variable addition.
+
+## 2026-05-22
+
+### Additions and New Features
+
+- Added `Brewfile` at repo root declaring `rustup` and `python@3.12` Homebrew formulae for one-step macOS dependency install (`brew bundle`).
+
+### Behavior or Interface Changes
+
+- `docs/INSTALL.md` gained a `## Quick install (macOS)` section pointing at the new `Brewfile`, ahead of the existing `## Install steps` flow. Quick-install block also documents [update_rust.sh](../update_rust.sh) for toolchain refresh.
+- `docs/INSTALL.md` rewritten end-to-end for novice terminal users: six numbered steps (clone, install deps, build, config, register hook, verify), explicit macOS Homebrew vs Linux curl branches, absolute-path printing helpers (`echo "$(pwd)/..."`), concrete `~/.claude/settings.json` example with `/ABSOLUTE/PATH/TO/` placeholders, `Updating later` section, and `Troubleshooting` table covering the five common failure modes.
+- `docs/USAGE.md` `## Tests` section rewritten as runnable `bash config_test.sh` block; added new `## Maintenance` section pointing at [update_rust.sh](../update_rust.sh).
+- `README.md` Documentation section now links `docs/INSTALL.md` and `docs/USAGE.md` ahead of the existing CLAUDE_HOOK_USAGE_GUIDE / CHANGELOG / REPO_STYLE / PYTHON_STYLE / AGENTS entries. Readers reaching the repo root now have a direct path to the install and usage docs.
+- `README.md` restructured by `readme-docs` skill (docs/ has 19 files, large docset per skill rules). Documentation section split into three labeled subsections: `Getting started` (INSTALL, USAGE, CLAUDE_HOOK_USAGE_GUIDE), `Reference` (CONFIGURATION_GUIDE, CODE_ARCHITECTURE, FILE_STRUCTURE, TOOL_INPUT_SCHEMAS, CHANGELOG), and `Repo standards` (AGENTS, REPO_STYLE, PYTHON_STYLE, PYTEST_STYLE, MARKDOWN_STYLE). Added a `Testing` section pointing at `config_test.sh`. Quick start step 3 now uses the direct binary path (`./target/release/...`) instead of `cargo run --release`, matching `docs/INSTALL.md`. Quick start step 4 swapped from a test command to the hook registration step (full procedure in `docs/INSTALL.md`). README now 42 lines.
+
+### Fixes and Maintenance
+
+- Refreshed `docs/INSTALL.md` per the `install-usage-docs` skill audit: added a Known-gaps row for exact macOS / Linux versions tested (88 lines, inside the 40-120 budget).
+- Refreshed `docs/USAGE.md`: trimmed the Examples blocks to drop the duplicated full-schema JSON output snippets (the schema still lives in the Output section), replaced `Running tests` with a one-paragraph `Tests` pointer to `config_test.sh` and `docs/PYTEST_STYLE.md`, and added a `--dry-run` Known-gaps placeholder (no such flag in `src/main.rs`).
+- Post-audit fixes from `audit-code-reviewer` pass: corrected `docs/INSTALL.md` `## Verify install` expected-output block to match the real `src/main.rs:92-94` `println!` (`Valid: loaded N rules (D deny, A allow)` plus the indented `Audit file` and `Audit level` lines; no `[INFO]` prefix). Replaced the misleading backticked `Matched rule` quote in `docs/USAGE.md` Examples with a description of `permissionDecisionReason`. Rewrote the `Tests` pointer sentence as a full clause instead of a label-colon fragment.
+
+### Developer Tests and Notes
+
+- `pytest tests/test_markdown_links.py tests/test_ascii_compliance.py` runs 2/2 green after the doc edits.
+- `audit-code-reviewer` skill ran six parallel reviewers (Plan, Test, Style, Docs, Legacy, Comment). Findings: 1 blocker (README missing INSTALL/USAGE links -- now fixed), 1 high (stale INSTALL.md validate output -- now fixed), 3 medium (`Matched rule` truncated quote -- fixed; long CHANGELOG bullet -- this split; `--dry-run` Known-gaps speculative -- deferred to user), 1 low (`Tests:` fragment phrasing -- fixed). Out-of-scope finding: `tests/test_toml_parse.py:77` `len()` parity assertion is fragile per `docs/PYTEST_STYLE.md` (pre-existing).
+
+## 2026-05-21
+
+### Additions and New Features
+
+- Added `DESIGN_PASSTHROUGH_TOOLS` skip-list to `src/auditing.rs` covering 12 tool names (`AskUserQuestion`, `CronCreate`, `CronDelete`, `CronList`, `EnterPlanMode`, `EnterWorktree`, `ExitPlanMode`, `ExitWorktree`, `LSP`, `PushNotification`, `ScheduleWakeup`, `SendUserFile`) that are passthrough-by-design. Early-return inside `audit_passthrough` skips their log entries so the gap-finding signal in `/tmp/claude-passthrough.json` stops being polluted by tools whose passthrough is intentional (8 documented at `example.toml:1287-1294`; 4 default-passthrough because no allow rule covers them).
+- Added `Last updated: 2026-05-21 19:06 UTC` header plus format-spec line under the H1 of `docs/CLAUDE_HOOK_USAGE_GUIDE.md` so readers can tell at a glance whether the guide matches the running config.
+- Added allow rule for bare `VAR=$!` / `VAR=$?` / `VAR=$$` env-capture shapes (regex `^[A-Z_][A-Z0-9_]*=\$[!?$]$`). Covers dev-server lifecycle PID and status capture (`DEVPID=$!`, `SERVER_PID=$!`, `STATUS=$?`) which previously hit the bare-assignment deny. Paired with a `command_exclude_regex` carve-out on the bare-assignment deny so the new shape is the only thing that allows.
+- Added allow for `python3 -m http.server` and extended the broad python allow rule's `command_exclude_regex` so `python3 -m pip`, `-m venv`, `-m ensurepip`, and file-arg `python3 -m json.tool <file>` all passthrough cleanly; stdin-form `python3 -m json.tool` (and `pytest`, `pyflakes`, `timeit`, `unittest`) stay auto-allow.
+- Added `wait` to `PROC_CMDS` so `wait`, `wait <pid>`, and `wait 2>/dev/null` auto-allow for shell-script lifecycle management.
+- Added new deny rule for empty/whitespace/literal-`null` commands (regex `^\s*(null)?\s*$`) with a steer message; previously these reached passthrough and stalled manager agents.
+- Widened the node allow rule's flag whitelist to accept `--test-name-pattern(=|<space>)<arg>`, `--test-only`, and `--test-reporter(=|<space>)<arg>` so real `node --test` invocations with reporter or pattern selectors no longer hit passthrough.
+
+### Fixes and Maintenance
+
+- Replaced `~/nsh/starter-repo-template/docs/CLAUDE_HOOK_USAGE_GUIDE.md` (794 lines, stale, missing the 2026-05-18 `node -e` and `printf > FILE` deny sections) with the local copy verbatim. Both files now 820 lines and byte-identical, resolving the 2026-05-18 drift between the canonical doc and the starter-repo mirror.
+- Mirrored the TOML rule changes from `example.toml` into `/Users/vosslab/nsh/junk-drawer/CODEX/claude/claude-code-permissions-hook.toml` byte-identically; the `~/.config/claude-code-permissions-hook.toml` symlink remains intact.
+- New `test_audit_passthrough_skips_design_passthrough_tools` test (uses `ExitPlanMode`, asserts file stays empty); existing `test_audit_passthrough_writes_entry` preserved (still uses `UnknownTool`, still logs).
+- Rotated `docs/CHANGELOG.md` per the 1000-line threshold in `docs/REPO_STYLE.md`. Moved 26 older day blocks (2026-05-15 through 2025-10-10) to a new archive `docs/CHANGELOG-2026-05b.md`; active file now 147 lines (was 1408 before rotation).
+
+### Decisions and Failures
+
+- Decided **not** to allow `kill <pid>`. `kill` can terminate any user-owned process, not just agent-spawned ones; the risk of killing the user's editor, browser, or background services outweighs the ergonomic win of one fewer passthrough prompt. Locked in as `passthrough` via fixture rows so the decision is regression-tested.
+- Resolved the `python3 -m json.tool` ambiguity: stdin form (`echo '{}' | python3 -m json.tool`) stays auto-allow because it consumes already-bounded stdout; file-arg form (`python3 -m json.tool data.json`) passes through to steer toward the Read tool. The split prevents `json.tool` from becoming a back-door file reader.
+- Investigated plan item for explicit localhost `curl` allow and found **no rule change needed**. `curl` is already in `SYS_CMDS` and pipeline forms (`curl http://localhost:8080/ | head`) already match the broad SAFE_CMDS allow. Locked in via fixture rows only -- documenting the negative result so the question stays answered.
+- Confirmed the 12-tool design-passthrough skip-list lives in `audit_passthrough` (not `try_audit_passthrough`); audit-skip is a routing decision, not an error path, so the early return belongs in the public entry point.
+
+### Developer Tests and Notes
+
+- 24 new fixture rows added to `tests/command_decisions.tsv` under the `2026-05-21 audit` section covering the wait-builtin allow, bare-env-var-only allow + carve-out, empty/null command deny, broad-python module whitelist split, node test-runner flag widening, `kill <pid>` passthrough lock-in, and the localhost curl negative result. Three existing rows (702-704) flipped from passthrough to deny under the new empty/whitespace deny.
+- Decision corpus runs at `passed=2092, skipped=0` across both configs (up from 2044, +48 = 24 new rows times 2 configs).
+- `cargo run --release --bin claude-code-permissions-hook -- validate --config example.toml` reports `Valid: loaded 137 rules (68 deny, 69 allow)`.
+- Auditing suite: 7 `auditing` tests pass; 85 lib tests pass overall; zero new clippy warnings.
+
+## 2026-05-18
+
+### Behavior or Interface Changes
+
+- Deny `node -e` / `node --eval` outright; mirrors the existing `python -c` deny. Steers to `_temp.mjs` + `node _temp.mjs`. Previously only the command-substitution shape `node -e "$(...)"` was denied; plain inline JS reached passthrough and was stalling manager agents (96 fixture + 13 real entries in `/tmp/claude-passthrough.json`, the largest single Bash-passthrough source).
+- Deny `printf` used as a Write-tool replacement: `printf '...' > FILE`, `printf '...' >> FILE`, `printf '...' | tee FILE`, `printf '...' | tee -a FILE`. Steers to the Write tool (or Edit for appends). Bare `printf '...'` for stdout formatting stays allowed via SYS_CMDS. Triggered by 53 passthrough entries assembling large markdown/code blobs.
+
+### Fixes and Maintenance
+
+- `tests/command_decisions.tsv`: flipped 4 `node -e` / `--eval` rows from `passthrough` to `deny`; added 8 new node fixtures (absolute-path forms, `command`/`env` prefixes, `-B -e` interpreter-flag form, allow `node _temp.mjs`) and 6 new printf fixtures (4 deny, 2 allow). Decision corpus passes at 2044 rows across both configs.
+
+### Decisions and Failures
+
+- Confirmed `SendUserFile`, `PushNotification`, `LSP` stay as passthrough by design; downstream (Claude Code UI / user prompt) handles consent. Do not add auto-allow rules for these tools.
+
+## 2026-05-15
+
+### Additions and New Features
+
+- Audit pass over `/tmp/claude-passthrough.json` (523 entries) identified recurring passthroughs that should resolve to allow or deny. Governing principle codified: passthrough is an unresolved decision; recurring shapes must be promoted to allow or deny+steer.
+- Added allow rule for `xargs <flags>* (grep|egrep|fgrep|rg) ...` as a pipeline-leaf consumer. Pairs with the existing `git ls-files <pathspec>` allow to make `git ls-files | xargs grep PAT` (the canonical bulk-search recovery) auto-allowed end-to-end. Destructive xargs verbs (`rm`, `chmod`, `chown`, `mv`, `sudo`) stay denied by D3.
+- Added allow rule for the exact `cd "$(git rev-parse --show-toplevel)"` idiom (with or without surrounding quotes). The literal substitution body is whitelisted; any other `$(...)` body still falls back to the generic `SAFE_CMDS` allow (which excludes `NO_CMD_SUB`).
+- Added allow rule for plain `perl <script>.pl` script execution (analogous to `python3 <script>.py`). The pre-existing WeBWorK deny still fires first on `.pg`/`.pgml` extensions.
+- Extended `FIND_SAFE_PATH_ARG` to include `~/.claude/plugins`, `~/.claude/plans`, and `~/.claude/projects` alongside the existing `agents|commands|skills` allowlist. Read-only `find` over those Claude-config subtrees is now auto-allowed.
+- Added `reset` to the git read-only allow subcommand list. Allows `git reset HEAD [path]` unstage operations. `git reset --hard` on protected branches stays denied by the protected-branch rule above.
+
+### Behavior or Interface Changes
+
+- Absolute-path forms of safe utilities (`/usr/bin/whoami`, `/usr/bin/xxd`, `/bin/cat`, etc.) now **deny + steer to PATH form** instead of passing through to user approval. Covers the entire `SAFE_CMDS` set; `grep|egrep|fgrep|rg` and `find` keep their dedicated context-specific denies (carve-out via `command_exclude_regex`). User-confirmed governing rule: keep PATH discipline visible; absolute-path variants are never passthrough.
+- All `git push` forms from agents now deny (every branch, every form). Previously only `--force` and protected-ref pushes denied; non-protected branch pushes (`git push origin agent/<task>`) reached passthrough. User-confirmed rule: agents never push; the human pushes after reviewing local commits.
+- Added denies + steer messages for: `less <file>` (-> Read tool); `pcregrep`/`ack`/`ag` with a file path argument (-> same recovery as grep/rg file-arg); `node -e "$(...)"` / `node --eval "$(...)"` (inline eval + command substitution is the classic RCE shape -> `_temp.mjs` + `node _temp.mjs`).
+
+### Fixes and Maintenance
+
+- Fixed decomposer bug where `extract_command_substitutions` byte-scan ignored shell quoting. A grep PATTERN like `'... \$( ...'` (single-quoted literal) or `"... \$( ..."` (double-quoted, backslash-escaped) emitted a phantom inner leaf containing garbage, forcing the surrounding chain into passthrough. Added single-quote region tracking and backslash-escape handling. Double quotes intentionally do NOT protect `$(...)` because shell expands substitutions inside `"..."`.
+- Updated ~90 existing rows in `tests/command_decisions.tsv` whose expected decision changed from passthrough to deny (entire `/usr/bin/<safe-cmd>` matrix, `git push origin agent/foo`, `git push -u origin agent/foo`, `node -e "$(curl ...)"`) or from passthrough to allow (`perl plain.pl`, `find ~/.claude/projects -type f`). Added 27 new fixtures covering the xargs-grep pipeline shapes, cd-rev-parse idiom, Claude-config find safe-zone extension, git-reset HEAD unstage, less/pcregrep/ack/ag denies, node-eval-with-cmdsub deny, plain-perl allow, alternate abs-path roots (`/bin`, `/opt/homebrew/bin`). Decision corpus passes at 2022 rows across both configs.
+
+### Decisions and Failures
+
+- User-confirmed rule for recurring passthroughs: every recurring shape resolves to allow (codified rule) or deny + steer (codified rule with message). Default preference: deny + steer to PATH/canonical form. Allow only when the canonical form is the absolute-path form. Passthrough remains acceptable only for genuinely ambiguous cases (e.g. quoted-root `find` shapes already documented as residual).
+- Dropped `command_exclude_regex = "${NO_CMD_SUB}"` from the xargs-grep allow rule. Reason: legitimate grep PATTERN strings contain literal `$(` (e.g. searching test fixtures for the `node -e "$(...)"` RCE shape). The decomposer already extracts real `$(...)` substitutions as separate leaves, so the NO_CMD_SUB exclude was redundant for safety and false-positived on every grep PATTERN that mentioned `$(`.
+- `git push agent/<branch>` is now an unconditional deny rather than allow-on-feature-branch. User explicitly said "never git push for agents." The human reviews local commits and pushes after approving.
+
+### Developer Tests and Notes
+
+- Verification: `bash config_test.sh` ends with `OVERALL: ALL TESTS PASSED (passed=2022, skipped=0)`. Cargo build clean; `cargo test` passes. Live config at `~/.config/claude-code-permissions-hook.toml` (symlinked into `~/nsh/junk-drawer/CODEX/claude/`) and `example.toml` both updated and in parity for the new rules; reason-string parity test still passes.
+
+## 2026-05-17
+
+### Additions and New Features
+
+- Added a bounded read-only `find` allow rule (A1) plus orthogonal `find` denies (D1a destructive predicates, D1b conservative-deny advanced predicates, D2a bare/system roots + bare `~`, D2b non-workspace home subdirs, D2c broad user-config/cache trees, D3 destructive `xargs` pipelines, D4 bare `find`, D5 `find` with path traversal or command substitution) to `example.toml` and `~/nsh/junk-drawer/CODEX/claude/claude-code-permissions-hook.toml`. Replaces the single broad `find` deny that the prior PR set up. A1 allows `find <safe-path-arg>` where the safe path argument is a relative path (no leading `/`, `~`, `$`, `..`, or shell glob), `.`/`./...`, `/tmp/...`, `/private/tmp/...`, `~/<workspace>/...`, `/Users/<user>/<workspace>/...`, or `$HOME/<workspace>/...`. Common read-only predicates ride along (`-name`, `-iname`, `-type f|d|l`, `-path`, `-maxdepth`, `-mindepth`, `-not`, `!`, `-o`, `-a`, grouping `(` `)`, `-print`, `-empty`). A narrow allowlist for Claude agent-config subtrees (`~/.claude/agents`, `~/.claude/commands`, `~/.claude/skills`, and absolute/`$HOME` equivalents) lets agents inspect their own working context; broad `~/.claude` and `~/.config` recursion is denied by D2c. Two new TOML variables (`WORKSPACE_ROOT` and `FIND_SAFE_PATH_ARG`) parameterize the workspace folder name -- `"projects"` in `example.toml`, `"nsh"` in the live config -- so reason strings stay byte-identical between configs (parity test `tests/test_toml_parse.py::test_example_and_live_config_reason_parity` still passes).
+- Added a new `### Why find got a safe-zone allow` subsection to `docs/CONFIGURATION_GUIDE.md` under the existing `## Deny message style`. Captures the bucket-scan evidence (385 historical `find` leaves across three logs; ~99% denied; dominant shapes are repo-relative, `/tmp`, and workspace-absolute paths), the rejected Option A (deny-all) and Option B (require `-maxdepth`) policies, the chosen seven-rule split, and the residual passthrough for non-standard `/Users/<me>/<subdir>` absolute paths and quoted path roots.
+
+### Behavior or Interface Changes
+
+- `find` now allows read-only discovery in safe path zones instead of denying every invocation. Most historical shapes become allow under the new policy without rewriting (`find . -name '*.py'`, `find /tmp -name '*.py'`, `find docs -type f`, `find ~/<workspace>/repo -type f`, etc.). Destructive predicates (`-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprintf`, `-fls`) and destructive `xargs` pipelines (`find ... | xargs rm|chmod|chown|mv|sudo`) stay denied. Bare `find` with no args is now an explicit deny (was previously caught by the broad rule). Advanced filters (`-printf`, `-print0`, `-prune`, `-newer`, `-mtime`, `-atime`, `-user`, `-group`, `-perm`, `-size`, `-links`, `-inum`, `-samefile`, `-fstype`, `-mount`, `-xdev`, `-regex`, `-iregex`) are conservatively denied this pass; add a focused rule with fixtures if logs show legitimate demand.
+- D3 (destructive `xargs` pipelines) is broader than the `find`-allow strictly requires: it denies `xargs rm|chmod|chown|mv|sudo` for any upstream producer, not just `find`. Documented here so the scope expansion is visible -- `git ls-files | xargs rm`, `cat list.txt | xargs rm`, etc. now also deny. Reason: destructive `xargs` is independently risky and the pipeline shape is the actionable signal.
+- Rewrote the `### find` subsection in `docs/CLAUDE_HOOK_USAGE_GUIDE.md` top to bottom: safe-zone shape, allowed predicates, denied predicates, residual passthrough, and quoted-path-root scope. Bash-side reference table and Common patterns table both updated to reflect bounded read-only `find` as the primary recovery, with `git ls-files <pathspec>` preferred inside git repos for tracked-file discovery.
+
+### Fixes and Maintenance
+
+- Compressed `docs/CLAUDE_HOOK_USAGE_GUIDE.md` prose using tiered rewriting (42,880 -> 34,316 chars; 20% reduction). Kept all 62 Markdown headings (anchor stability), all fenced code blocks, all tables, and all 30 `**Blocked:**` example blocks verbatim. Applied light prose-tightening to every section and aggressive compression (2-3 lines) to 19 lowest-impact deny sections. Added concise recovery sentences to `grep/rg`, `git grep`, `find`, `awk`, and `sed -n` sections. Preserved Tier 3 detail in high-blast-radius sections (git restore/.., git commit, git reset, find, rm). No allow/deny rules, anchors, commands, paths, flags, examples, or blocked shapes changed. Verified: `pytest tests/test_markdown_links.py tests/test_ascii_compliance.py` pass; all heading diffs empty; all Blocked block counts stable.
+- Updated three pre-existing rows in `tests/command_decisions.tsv` whose old-policy `deny` expectations are now `allow` under the new safe-zone rule (`find . -name "*.py"`, `find /tmp -name *.py`, `/usr/bin/find . -name *.py`). Appended ~60 new TSV rows covering every shape: read-only allow forms (relative paths, `/tmp`, tilde-workspace, `$HOME`-workspace, `/Users/<me>/<workspace>` absolute, pipeline filters, read-only `xargs`); deny forms (bare `find`, bare `/`, system roots, bare `/Users`/`/Users/<user>`, non-workspace home subdirs, flag-before-path system roots, destructive predicates, advanced filters, destructive `xargs` pipelines, path traversal, command substitution); passthrough forms (non-standard home subdir, quoted path roots); absolute-path invocation coverage (`/usr/bin/find`, `/opt/homebrew/bin/find`, `command find`). Workspace-specific rows use the 4-column TSV form with explicit config path (`claude-code-permissions-hook.toml` for live, `example.toml` for example) since `WORKSPACE_ROOT` differs between configs. Decision corpus runs at 1922 passing rows across both configs.
+- Fixed four regex bugs in the new `find` rules surfaced by the decision-corpus run. (1) A1's trailing `\b` terminator failed when the safe path argument ended in a non-word character (`.`, `/`, `-`). Replaced with `(?:\s|$)`. (2) D2a missed bare `/` at end-of-line (the original `/\s` required trailing whitespace). Replaced with `/(?:\s|$)`. (3) D2a missed trailing-slash variants of bare home roots (`find /Users/`, `find /Users/vosslab/`). Added an optional `/?` before the `(\s|$)` terminator on the `/(Users|home)` branch. (4) FIND_SAFE_PATH_ARG's `$HOME` branch originally wrote `\\$HOME` but the config's env-var expander (`src/config.rs::expand_env_vars`) substitutes `$HOME` to the absolute home path before the regex sees it, breaking the literal-`$HOME` match. Replaced with `[$]HOME` so the env-var expander pattern (`\$([A-Z_][A-Z0-9_]*)`) doesn't match inside the character class.
+
+### Decisions and Failures
+
+- Evidence pass before implementation: ran a fresh `tools/_scan_find_buckets.py` (scratch, not committed) over `/tmp/claude-tool-use.json` on laptop + Mac Studio plus the rotated `.1.json`. Total 385 historical `find` leaves; ~99% denied by the prior broad rule. Top buckets: relative-path `find <reldir> -name <pat>` (~175), `/tmp` (~84), `find . -type f` family (~56), `/Users/<me>/<workspace>/<repo>/...` (~50), six already-bounded `-maxdepth N` shapes that the prior rule denied anyway, ~2 destructive `-exec` cases, 0 bare-system-root scans. The data drove the rejection of two earlier candidate policies: deny-all (mismatched with `Glob` tool unavailability) and require-`-maxdepth` (would have rewritten ~370 of 385 historical leaves for boundedness the path zone already supplies).
+- Rust regex crate has no lookaround. Without lookaround the cleanest expression of "any `/Users/<user>/<not-workspace>/...`" is a *positive* enumeration of the standard macOS home subdirs (D2b: `Downloads`, `Documents`, `Desktop`, `Library`, `Movies`, `Music`, `Pictures`, `Public`, `Applications`). Non-standard non-workspace subdirs (e.g. `/Users/<me>/scratch_random_dir/...`) fall through to passthrough. Acceptable residual gap -- passthrough is a user-approval dialog, not a stall.
+- Quoted path roots (`find "docs" -name '*.md'`, `find './src' -type f`) are out of scope for this pass. The `FIND_SAFE_PATH_ARG` regex doesn't strip surrounding quotes; quoted forms fall through to passthrough. Documented in `docs/CLAUDE_HOOK_USAGE_GUIDE.md` ("drop the quotes around the path root"). If logs show recurring quoted shapes, extend the path-arg regex.
+
+### Developer Tests and Notes
+
+- Verification: `bash config_test.sh` (cargo build + cargo test + decision corpus) ends with `OVERALL: ALL TESTS PASSED (passed=1922, skipped=0)`. `pytest tests/test_toml_parse.py tests/test_markdown_links.py tests/test_ascii_compliance.py` runs 9/9 green. Manual smoke tests against the binary covered five shapes (allow `find . -name '*.py'`, allow `find /Users/vosslab/nsh/<repo> -type f`, deny `find /Users`, deny `find . -delete`, deny `find . -name '*.tmp' | xargs rm`, deny bare `find`). All match expected decisions.
+- Evidence script `tools/_scan_find_buckets.py` is local-only scratch (underscore-prefixed, not committed). Produced output saved as `/tmp/find_bucket_scan.txt` and quoted in the PR description.
+
+## 2026-05-16
+
+### Additions and New Features
+
+- Added a hardcoded path-existence pre-check for `Read`, `Edit`, `MultiEdit`, `Glob`, and `Grep` tool calls in a new `src/path_check.rs` module, wired into `src/lib.rs` immediately before the TOML deny-rule loop. Before this change, agents that invented file paths (the common "hallucinated path" failure mode) hit one of two stalls: if the path matched an allow zone regex, Claude Code ran the call and failed at execution with a file-not-found error wasting a turn; if it did not match any allow zone, the call routed to passthrough and blocked until the user manually denied. The pre-check now converts both stalls into immediate deny with a tool-specific reason that names the missing path. Tool semantics: Read denies if `file_path` is missing or a directory (symlinks-to-files OK; symlinks-to-missing and directories denied via `fs::metadata().is_dir()`); Edit and MultiEdit deny only when neither the file nor its parent directory exists (preserves legitimate new-file edits inside an existing directory); Glob requires the resolved `path` to exist as a directory; Grep requires the resolved `path` (when provided) to exist as a file or directory, and skips the check when no `path` field is supplied (cwd fallback trusted). Write stays exempt -- Write creates new files by design. Patch 1 (Rust): `src/path_check.rs` (new, 195 lines), `src/lib.rs` (one wire-in call after line 142). Patch 2 (fixtures): existing `tests/read_allowed.json`, `tests/edit_allowed.json`, `tests/glob_allowed.json`, `tests/grep_allowed.json`, `tests/read_path_traversal.json` rewritten to point at a `/tmp/cck-test/` tree materialized by `setup_test_paths()` in `tools/run_command_decisions.py`; `tests/test_config.toml` `NSH_PATH` variable repointed at `^/tmp/cck-test/` and the four `Read/Write/Edit/Glob/Grep` allow rules switched to `${NSH_PATH}.*` so the literal is no longer duplicated. Patch 3 (docs): this changelog plus the agent-facing section added to `docs/CLAUDE_HOOK_USAGE_GUIDE.md` (see below) and the rationale block added to `docs/CODE_ARCHITECTURE.md`. The `Ok(false)` vs `Err(_)` distinction is preserved in every reason string: "does not exist" only fires on a confirmed-missing result; "could not confirm" fires on permission errors or other `io::Error` kinds so the message stays accurate.
+- Added 22 path-existence rows to `tests/command_decisions.tsv`: per-tool denies for clearly-invented paths (`/random/abcdefghij.ext`, `/Users/no_such_user/notes.md`, `/no/such/dir/here/file.py`, `/var/imaginary_dir`, `/opt/never_existed`, plus seven previously-passthrough rows for `/opt/random/file.txt`, `/etc/shadow`, `/var/log/auth.log`, `/root/.ssh/id_rsa`, `/proc/self/environ`, and `/etc/secrets` -- all of which now route to deny via the pre-check rather than waiting for manual approval); Read deny for a directory passed as `file_path`; Glob deny for a file passed where a directory is expected; Edit allow for a new file in an existing dir; and Write passthrough rows that prove Write stays exempt. Total fixture count rose from 1707 to 1724; all pass against both `example.toml` and the live config.
+- Added `tools/_scan_missing_paths.py` (scratch script, underscore-prefixed) that scans `/tmp/claude-tool-use.json` to bucket every Read/Edit/MultiEdit/Glob/Grep event by what the pre-check would do (allow / deny_missing / deny_is_dir / deny_both_missing / deny_not_dir / no_path_field). Used during this PR to confirm impact before committing to the Rust implementation: against a 25,246-line log (2,809 relevant tool events), the scan found 365 Read denies (344 missing + 21 directory) and 14 Edit both-missing denies that would previously have stalled as failed execution or passthrough. Sample paths informed the TSV fixture selection so the deny cases mirror real agent failures, not invented patterns.
+
+### Behavior or Interface Changes
+
+- `Read`, `Edit`, `MultiEdit`, `Glob`, and `Grep` calls that previously routed to passthrough on a missing path now route to deny. Agents see one of these reason strings immediately, instead of waiting on the user: "Verify the file path before retrying. Read target does not exist: <path>."; "Read targets a file, not a directory. Use the Glob tool to list directory contents. Path is a directory: <path>." (wording superseded later the same day; see the reason-text revision bullet below and `src/path_check.rs` for the current text); "Create the parent directory first or choose an existing path. Edit target and parent directory are both missing: <path>; parent: <parent>."; "Choose an existing search directory before retrying. Glob path does not exist as a directory: <path>."; "Choose an existing file or directory before retrying. Grep path does not exist: <path>." -- and a parallel "could not confirm" variant for `io::Error` kinds other than `NotFound`. This is a behavior change for any plan that relied on a missing-path Read sliding to passthrough; the new behavior is closer to the user's intent in every observed case from the passthrough log review.
+- Replaced five deny-reason strings in `example.toml` and `claude-code-permissions-hook.toml` that steered to the Grep and Glob tool calls with recovery paths that use `git ls-files <pathspec>`, `ls <dir>`, piped `grep`/`rg`, and `_temp.py` helpers. Rules touched: `find` (old: "Invoke the Glob tool: pattern='**/*.py'..." -> new: "Use `git ls-files <pathspec>` inside a git repo, or `ls <dir>`..."); `git grep` (tool call -> piped grep on bounded `git show` output); file-path `grep|egrep|fgrep|rg` deny (two rules with same old reason); Claude Code tool-name-in-Bash (tool calls -> bounded recovery); `awk` (tool call -> Grep for line-match, `_temp.py` for field extract). Regex patterns and allow rules untouched; 1724 TSV fixtures still pass after the reason rewrites.
+
+### Fixes and Maintenance
+
+- Reworked `tests/test_toml_parse.py` to glob every repo-root `*.toml` instead of hard-coding the file list. `claude-code-permissions-hook.toml` is a local symlink and is not present on every checkout, so a static list would either skip it (silent gap) or fail on clean clones. The new test parses each TOML found at the repo root with `tomllib` and asserts every `[[deny]]` rule carries a non-empty `reason`. Added a third test, `test_example_and_live_config_reason_parity`, which closes the WP-A2 gap from 2026-05-15: when both `example.toml` and `claude-code-permissions-hook.toml` are present it compares deny `reason` arrays index-by-index, normalizing `~/nsh/` <-> `~/projects/` so the intentional path-personalization swap on Write/Edit system-dir denies is the only divergence allowed. `pytest tests/test_toml_parse.py` now runs 7 cases (3 parses, 3 reason-presence checks, 1 parity).
+- Updated [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md) reason-recovery sections: `## Bash-side reference for redirected commands` table preamble now clarifies that Glob/Grep columns document the defensive tool-call steer, not the primary agent pattern; Grep/Glob rows flagged with "Tool may not be available; use Bash alternatives below."; the `### grep|rg with file paths`, `### git grep`, `### find`, `### awk`, and `### Claude Code tool names typed as Bash commands` sections rewrote **Instead:** blocks to center on `git ls-files <pathspec>`, `ls <dir>`, piped `grep`/`rg` on stdout, and `_temp.py` helpers that filter bounded candidate lists; `## Best practices` simplified the Glob/Grep steer to mention that tools may not be available; `## Common patterns` table preamble notes "There is no Bash escape hatch for searching repo files -- use the Grep tool" is now contextual ("When Grep is unavailable"); rows for Search/Find/Tool-name updated to list Bash fallbacks; `## File access zones` added a preamble warning that Glob/Grep availability is contextual; `## Path existence pre-check` lead paragraph marked Glob/Grep coverage as defensive; the "For Read of a directory" recovery in `## What to do` section now recommends `ls <dir>` / `git ls-files <pathspec>` before mentioning the Glob tool. Updated `../src/path_check.rs` read_directory_denies reason from "Use the Glob tool to list directory contents" to "Use `ls <dir>` or `git ls-files <pathspec>` instead."
+- Replaced the fixed `/tmp/plan_mode_test` directory in `tools/test_plan_mode_enforcement.py` with `tempfile.mkdtemp(prefix="plan_mode_test_", dir="/tmp")` so concurrent runs of the diagnostic do not collide on a shared name. Parent stays anchored at `/tmp` so the hook's Write/Edit auto-allow still covers it.
+- Updated `tests/README.md` to describe `pytest tests/` as "Python lint + TOML invariants" rather than "Python lint gates", since `tests/test_toml_parse.py` now enforces TOML parse and deny-reason invariants from the fast lane.
+- Replaced the dangling `docs/MARKDOWN_STYLE.md#Denied-command-sections` link in `docs/CONFIGURATION_GUIDE.md` with an in-repo pointer to the `## Denied commands` ordering convention in `docs/CLAUDE_HOOK_USAGE_GUIDE.md`. The MARKDOWN_STYLE.md anchor never existed locally because that doc is centrally maintained and the new section was deferred upstream; the dangling link would have 404'd on GitHub.
+
+### Decisions and Failures
+
+- Held pre-implementation evidence scan with `tools/_scan_grep_glob_buckets.py` (scratch underscore-prefixed) that classified 31,716 logged Bash events into grep/glob-like shape buckets. Final counts from the durable replay report in `/tmp/grep_glob_bucket_scan.txt`: `find` 243 deny; `git grep` 433 deny; `grep_file` 407 deny + 130 absolute-path deny; `rg_file` 130 deny + 130 absolute-path deny; `egrep_file` 108 deny; `fgrep_file` 54 deny; `awk_line_match` 185 deny / 91 allow; `sed_n_file` 187 deny; piped `grep`-bounded 177 allow; `git_ls_files` 286 allow; `ls` 640 allow; `python_temp_helper` 16 allow; `Read` tool 2120 events. Every denied bucket maps to a recovery path that is both allowed by the hook and observed available in the logged event stream (e.g., agents that hit `find` deny proceed to `ls` or `git_ls_files` instead of getting stuck on passthrough). Acceptance criterion met: the new deny-reason rewrites steer to patterns the agent already knows how to execute.
+- Confirmed that Live test in this session returned `No such tool available: Grep` and `No such tool available: Glob`, validating the finding from the 2026-05-16 path-existence PR: Glob and Grep tool calls are not exposed in the target agent context. This explains why hook deny reasons that steered to Grep/Glob had near-zero conversion: model sees the steer text but tools are not in capability list. That context mismatch was the primary reason for the reason-recovery rewrite to use Bash patterns instead. The path-existence pre-check is still valid for Read and Edit (100% adoption); Glob and Grep coverage is defensive and should not be polished further until the adoption gap is investigated separately.
+- Kept `tools/run_command_decisions.py` in `tools/` as the E2E fixture runner for compiled-hook behavior; it is not redundant with `tests/test_toml_parse.py`. The pytest validates TOML parse and deny-reason invariants in milliseconds without a build; the tool exercises the compiled Rust binary against ~1724 TSV fixtures and is the only check that observes real decision outcomes.
+- Left `tools/test_plan_mode_enforcement.py` in `tools/` despite its `test_` prefix violating `docs/E2E_TESTS.md` naming. It is a manual Claude CLI probe, not a pytest, and `conftest.py` does not collect from `tools/`. Cleaner name (`tools/check_plan_mode_enforcement.py`) is out of scope for this PR.
+- Direct test during the PR confirmed the root cause of the Grep/Glob adoption gap: in the active Claude Code session for this PR, invoking the Grep and Glob tools returned `No such tool available: Grep` and `No such tool available: Glob`. Per-session log analysis matched: 10 of 11 real agent sessions produced zero Grep/Glob events (the eleventh produced 1 Grep call across 4,462 events; the "decision-runner" session is the TSV harness, not an agent). Glob and Grep are real built-in tools in Claude Code's tool reference, but availability is contextual -- this user's default agent setup does not expose them to most agents. That explains why the hook's deny reason steering toward Grep/Glob has near-zero conversion: the model sees the steer text, but the tools are not in its capability list. The "Bash retry on different path" fallback is the rational behavior for an agent without the target tool.
+- Log scan during the path-existence PR surfaced a separate finding worth its own follow-up: denies that steer Bash `grep`/`find` toward the Grep/Glob tools almost never convert into actual tool calls. Across 32,699 logged events, 534 file-grep denies produced 0 Grep tool calls and 222 find denies produced 0 Glob tool calls. Agents instead retry the same Bash form on a different path (366 / 115), switch to `ls` (4 / 29), or fall back to Read of the whole file (23 / 10). One Grep tool call total in the entire window confirms the tool exists in some persona's tool list. Anthropic's Claude Code tool reference lists Glob and Grep as built-in tools separate from Bash, Read, Edit, and Write, but the same docs note that exact tool availability depends on provider, platform, settings, and subagent frontmatter (subagents can allowlist a subset via the `tools` field). Anthropic's own permissions docs also treat Bash `grep` and `find` as read-only exploration commands that run without a prompt by default -- which may reinforce the agent's Bash reflex even after a deny. Hook PreToolUse `permissionDecisionReason` for `deny` is returned to Claude, so the model is seeing the steer text; it just is not reliably converting "Invoke the Grep tool" prose into a cross-tool call. The path-existence PR is still valid for Read and Edit (where adoption is 100%); Glob and Grep coverage in this PR is defensive and should not be polished further until the adoption gap is investigated separately. Follow-up issue: (1) ask a live session "What tools do you have access to?" to confirm Grep/Glob are exposed; (2) check subagent frontmatter for `tools:` allowlists that may omit Grep/Glob; (3) add per-agent_type / per-model / per-permission-mode logging to the audit emitter; (4) A/B test deny reasons -- current prose ("Invoke the Grep tool with pattern/path...") versus an explicit copyable template ("Use Grep(pattern=\"<re>\", path=\"<file>\") now. Do not retry grep in Bash."). Some negative prompting may be justified here because the log shows agents repeatedly retrying the denied Bash form on different paths rather than considering a different tool family.
+- Chose a hardcoded pre-check over a new TOML schema field (`path_must_exist = true`) for the path-existence check. Every realistic config wants this behavior; a flag would only add a way to disable it. Chose `std::fs::metadata()` over `Path::try_exists()` so the `Read`-on-directory case can deny with a precise "is a directory" message instead of a generic existence message. Chose `Err(NotFound)` discrimination over treating every `Err(_)` as "does not exist" so permission-denied and malformed-path errors emit the more accurate "could not confirm" reason. Chose per-tool semantics (Read = file required, Edit = file-or-parent, Glob = directory, Grep = either) over a uniform "file or parent" rule after passthrough-log review showed that a uniform rule would still leak 344 Read-on-missing-file cases to "allow then fail at execution".
+
+### Developer Tests and Notes
+
+- `pytest tests/test_toml_parse.py` 7 passed after the deny-reason rewrites; the reason-parity test confirms live config and `example.toml` stay aligned (path-personalization-only divergence allowed).
+- `cargo build` clean after the `src/path_check.rs` reason wording update (from "Use the Glob tool to list directory contents" to "Use `ls <dir>` or `git ls-files <pathspec>`"); existing `read_directory_denies` test asserts on the stable "is a directory" substring which the new reason preserves, so no test edits required.
+- `pytest tests/test_markdown_links.py tests/test_ascii_compliance.py -q` passed; the reason rewrites and guide updates preserved every Markdown link (including backticked relative paths in recovery text) and stayed ASCII-clean.

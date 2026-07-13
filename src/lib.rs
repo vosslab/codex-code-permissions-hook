@@ -14,6 +14,7 @@ pub mod config;
 pub mod decomposer;
 pub mod hook_io;
 pub mod matcher;
+pub mod path_check;
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -106,76 +107,91 @@ fn process_hook_input_with_rules_and_context(
     protected_branches: &[String],
 ) -> HookResult {
     // Decompose Bash commands and check each sub-command
-    if input.tool_name == "Bash" {
-        if let Some(command) = input.extract_field("command") {
-            // Check the original full command against deny rules first.
-            // This catches patterns (like heredocs) that the decomposer
-            // strips when extracting leaf commands.
-            if let Some(reason) = check_rules_with_protected_branches(deny_rules, input, protected_branches) {
-                return HookResult::deny(reason);
-            }
+    if input.tool_name == "Bash"
+        && let Some(command) = input.extract_field("command")
+    {
+        // Check the original full command against deny rules first.
+        // This catches patterns (like heredocs) that the decomposer
+        // strips when extracting leaf commands.
+        if let Some(reason) =
+            check_rules_with_protected_branches(deny_rules, input, protected_branches)
+        {
+            return HookResult::deny(reason);
+        }
 
-            let sub_commands = decomposer::decompose_command(&command);
+        let sub_commands = decomposer::decompose_command(&command);
 
-            // Chain length limit: deny overly complex compound commands
-            if max_chain_length > 0 && sub_commands.len() > max_chain_length {
-                return HookResult::deny(format!(
-                    "Command has {} chained sub-commands (limit: {}). Break into smaller commands.",
-                    sub_commands.len(),
-                    max_chain_length,
-                ));
-            }
+        // Chain length limit: deny overly complex compound commands
+        if max_chain_length > 0 && sub_commands.len() > max_chain_length {
+            return HookResult::deny(format!(
+                "Command has {} chained sub-commands (limit: {}). Break into smaller commands.",
+                sub_commands.len(),
+                max_chain_length,
+            ));
+        }
 
-            // Deny check: if ANY sub-command matches ANY deny rule, deny everything
-            for sub_cmd in &sub_commands {
-                // Structural cmd-sub guard for search commands. The grep/rg/find
-                // allow rules no longer exclude on the NO_CMD_SUB regex (which is
-                // not single-quote-aware and wrongly blocked quoted patterns like
-                // `grep '`pat' file`). Real, unquoted command substitution inside a
-                // grep/rg/find leaf is denied here instead.
-                if is_search_cmd(sub_cmd) && decomposer::has_active_cmd_sub(sub_cmd) {
-                    return HookResult::deny(
-                        "Command substitution (backtick or `$(...)`) in a grep/rg/find \
+        // Deny check: if ANY sub-command matches ANY deny rule, deny everything
+        for sub_cmd in &sub_commands {
+            // Structural cmd-sub guard for search commands. The grep/rg/find
+            // allow rules no longer exclude on the NO_CMD_SUB regex (which is
+            // not single-quote-aware and wrongly blocked quoted patterns like
+            // `grep '`pat' file`). Real, unquoted command substitution inside a
+            // grep/rg/find leaf is denied here instead.
+            if is_search_cmd(sub_cmd) && decomposer::has_active_cmd_sub(sub_cmd) {
+                return HookResult::deny(
+                    "Command substitution (backtick or `$(...)`) in a grep/rg/find \
                          command is denied: it hides shell evaluation in a search. Single-quote \
                          the pattern if the characters are literal (`grep '`foo' file`), or run \
                          the substitution as a separate, reviewed command."
-                            .to_string(),
-                    );
-                }
-                let synthetic = input.with_command(sub_cmd);
-                if let Some(reason) = check_rules_with_protected_branches(deny_rules, &synthetic, protected_branches) {
-                    return HookResult::deny(reason);
-                }
+                        .to_string(),
+                );
             }
-
-            // Allow check: ALL sub-commands must match some allow rule
-            let mut all_reasons = Vec::new();
-            let mut all_allowed = true;
-            for sub_cmd in &sub_commands {
-                let synthetic = input.with_command(sub_cmd);
-                if let Some(reason) = check_rules_with_protected_branches(allow_rules, &synthetic, protected_branches) {
-                    all_reasons.push(reason);
-                } else {
-                    all_allowed = false;
-                    break;
-                }
+            let synthetic = input.with_command(sub_cmd);
+            if let Some(reason) =
+                check_rules_with_protected_branches(deny_rules, &synthetic, protected_branches)
+            {
+                return HookResult::deny(reason);
             }
-
-            if all_allowed && !sub_commands.is_empty() {
-                let combined = all_reasons.join("; ");
-                return HookResult::allow(combined);
-            }
-
-            return HookResult::passthrough();
         }
+
+        // Allow check: ALL sub-commands must match some allow rule
+        let mut all_reasons = Vec::new();
+        let mut all_allowed = true;
+        for sub_cmd in &sub_commands {
+            let synthetic = input.with_command(sub_cmd);
+            if let Some(reason) =
+                check_rules_with_protected_branches(allow_rules, &synthetic, protected_branches)
+            {
+                all_reasons.push(reason);
+            } else {
+                all_allowed = false;
+                break;
+            }
+        }
+
+        if all_allowed && !sub_commands.is_empty() {
+            let combined = all_reasons.join("; ");
+            return HookResult::allow(combined);
+        }
+
+        return HookResult::passthrough();
+    }
+
+    // Preserve the Claude profile's path checks for its file tools. Codex
+    // calls use Bash, apply_patch, or MCP names and pass through this check.
+    if let Some(reason) = path_check::check_path_exists(input) {
+        return HookResult::deny(reason);
     }
 
     // Codex also exposes apply_patch and MCP calls to PreToolUse. Evaluate
     // those calls directly without Bash decomposition.
-    if let Some(reason) = check_rules_with_protected_branches(deny_rules, input, protected_branches) {
+    if let Some(reason) = check_rules_with_protected_branches(deny_rules, input, protected_branches)
+    {
         return HookResult::deny(reason);
     }
-    if let Some(reason) = check_rules_with_protected_branches(allow_rules, input, protected_branches) {
+    if let Some(reason) =
+        check_rules_with_protected_branches(allow_rules, input, protected_branches)
+    {
         return HookResult::allow(reason);
     }
     HookResult::passthrough()
@@ -200,6 +216,26 @@ pub fn process_hook_input_with_rules(
     input: &HookInput,
 ) -> HookResult {
     process_hook_input_with_rules_and_context(deny_rules, allow_rules, max_chain_length, input, &[])
+}
+
+/// Process a hook input against pre-compiled rules while preserving configured
+/// protected-branch checks.
+///
+/// This is the runtime entry point used by the CLI after loading a config once.
+pub fn process_hook_input_with_rules_and_protected_branches(
+    deny_rules: &[Rule],
+    allow_rules: &[Rule],
+    max_chain_length: usize,
+    input: &HookInput,
+    protected_branches: &[String],
+) -> HookResult {
+    process_hook_input_with_rules_and_context(
+        deny_rules,
+        allow_rules,
+        max_chain_length,
+        input,
+        protected_branches,
+    )
 }
 
 /// Validate a configuration file.

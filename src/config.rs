@@ -29,7 +29,7 @@ pub struct Config {
 }
 
 /// Limits on command complexity. Commands exceeding these are denied.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct LimitsConfig {
     /// Maximum number of chained sub-commands in a single Bash invocation.
     /// Commands with more leaf sub-commands than this are denied.
@@ -56,15 +56,10 @@ fn default_protected_branches() -> Vec<String> {
 }
 
 fn default_protected_refs() -> Vec<String> {
-    vec!["refs/heads/main".to_string(), "refs/heads/master".to_string()]
-}
-
-impl Default for LimitsConfig {
-    fn default() -> Self {
-        Self {
-            max_chain_length: 0,
-        }
-    }
+    vec![
+        "refs/heads/main".to_string(),
+        "refs/heads/master".to_string(),
+    ]
 }
 
 /// Controls what gets written to the audit log file.
@@ -141,7 +136,10 @@ impl Config {
             .with_context(|| format!("Failed to parse TOML config: {}", path.display()))?;
 
         // Auto-inject PROTECTED_BRANCHES variable from git_protection config
-        let protected_branches_regex = config.git_protection.protected_branches.iter()
+        let protected_branches_regex = config
+            .git_protection
+            .protected_branches
+            .iter()
             .map(|b| regex::escape(b))
             .collect::<Vec<_>>()
             .join("|");
@@ -300,7 +298,11 @@ fn expand_variables(input: &str, vars: &HashMap<String, String>) -> Result<Strin
                 result = result.replace(&full_match, value);
             }
             None => {
-                bail!("Undefined variable '{}' referenced in pattern: {}", var_name, input);
+                bail!(
+                    "Undefined variable '{}' referenced in pattern: {}",
+                    var_name,
+                    input
+                );
             }
         }
     }
@@ -327,66 +329,73 @@ fn compile_rule_with_vars(
     }
 
     // Compile tool_regex if present
-    let tool_regex = rule_config.tool_regex.as_ref()
+    let tool_regex = rule_config
+        .tool_regex
+        .as_ref()
         .map(|s| Regex::new(s))
         .transpose()
         .context("Invalid tool_regex")?;
 
     // Expand variables in all regex string fields
-    let fp = expand_opt(&rule_config.file_path_regex, vars)
-        .context("In file_path_regex")?;
+    let fp = expand_opt(&rule_config.file_path_regex, vars).context("In file_path_regex")?;
     let fp_ex = expand_opt(&rule_config.file_path_exclude_regex, vars)
         .context("In file_path_exclude_regex")?;
-    let cmd = expand_opt(&rule_config.command_regex, vars)
-        .context("In command_regex")?;
-    let cmd_ex = expand_opt(&rule_config.command_exclude_regex, vars)
-        .context("In command_exclude_regex")?;
-    let sa = expand_opt(&rule_config.subagent_type_regex, vars)
-        .context("In subagent_type_regex")?;
+    let cmd = expand_opt(&rule_config.command_regex, vars).context("In command_regex")?;
+    let cmd_ex =
+        expand_opt(&rule_config.command_exclude_regex, vars).context("In command_exclude_regex")?;
+    let sa =
+        expand_opt(&rule_config.subagent_type_regex, vars).context("In subagent_type_regex")?;
     let sa_ex = expand_opt(&rule_config.subagent_type_exclude_regex, vars)
         .context("In subagent_type_exclude_regex")?;
-    let pr = expand_opt(&rule_config.prompt_regex, vars)
-        .context("In prompt_regex")?;
-    let pr_ex = expand_opt(&rule_config.prompt_exclude_regex, vars)
-        .context("In prompt_exclude_regex")?;
+    let pr = expand_opt(&rule_config.prompt_regex, vars).context("In prompt_regex")?;
+    let pr_ex =
+        expand_opt(&rule_config.prompt_exclude_regex, vars).context("In prompt_exclude_regex")?;
 
     // Compile expanded regex strings
-    let file_path_regex = fp.as_ref()
+    let file_path_regex = fp
+        .as_ref()
         .map(|s| Regex::new(s))
         .transpose()
         .context("Invalid file_path_regex")?;
 
-    let file_path_exclude_regex = fp_ex.as_ref()
+    let file_path_exclude_regex = fp_ex
+        .as_ref()
         .map(|s| Regex::new(s))
         .transpose()
         .context("Invalid file_path_exclude_regex")?;
 
-    let command_regex = cmd.as_ref()
+    let command_regex = cmd
+        .as_ref()
         .map(|s| Regex::new(s))
         .transpose()
         .context("Invalid command_regex")?;
 
-    let command_exclude_regex = cmd_ex.as_ref()
+    let command_exclude_regex = cmd_ex
+        .as_ref()
         .map(|s| Regex::new(s))
         .transpose()
         .context("Invalid command_exclude_regex")?;
 
-    let subagent_type_regex = sa.as_ref()
+    let subagent_type_regex = sa
+        .as_ref()
         .map(|s| Regex::new(s))
         .transpose()
         .context("Invalid subagent_type_regex")?;
 
-    let subagent_type_exclude_regex = sa_ex.as_ref()
+    let subagent_type_exclude_regex = sa_ex
+        .as_ref()
         .map(|s| Regex::new(s))
         .transpose()
         .context("Invalid subagent_type_exclude_regex")?;
 
-    let prompt_regex = pr.as_ref()
+    let prompt_regex = pr
+        .as_ref()
         .map(|s| Regex::new(s))
         .transpose()
         .context("Invalid prompt_regex")?;
 
-    let prompt_exclude_regex = pr_ex.as_ref()
+    let prompt_exclude_regex = pr_ex
+        .as_ref()
         .map(|s| Regex::new(s))
         .transpose()
         .context("Invalid prompt_exclude_regex")?;
@@ -467,7 +476,11 @@ mod tests {
         let result = expand_variables("^(${UNDEFINED})\\b", &vars);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("UNDEFINED"), "Error should mention variable name: {}", err_msg);
+        assert!(
+            err_msg.contains("UNDEFINED"),
+            "Error should mention variable name: {}",
+            err_msg
+        );
     }
 
     #[test]

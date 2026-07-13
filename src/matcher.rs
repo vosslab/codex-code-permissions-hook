@@ -9,8 +9,10 @@ use std::process::Command;
 
 /// Helper: parse git invocation to extract effective cwd and verb.
 /// Given a leaf command string, identifies:
+///
 /// - (a) the "verb" after git/git -c/-C/--git-dir/--work-tree
 /// - (b) the effective cwd (the -C path resolved against hook_cwd, or hook_cwd if absent)
+///
 /// Returns (verb, effective_cwd) on success, or None on parse error.
 fn parse_git_invocation(leaf: &str, hook_cwd: &Path) -> Option<(String, PathBuf)> {
     let parts: Vec<&str> = leaf.split_whitespace().collect();
@@ -23,13 +25,17 @@ fn parse_git_invocation(leaf: &str, hook_cwd: &Path) -> Option<(String, PathBuf)
     // Check for "command git" form
     if parts[idx] == "command" && idx + 1 < parts.len() && parts[idx + 1] == "git" {
         idx = 2;
-    } else if parts[idx] == "git" {
-        idx = 1;
-    } else if parts[idx].ends_with("/git") {
+    } else if parts[idx] == "git" || parts[idx].ends_with("/git") {
         idx = 1;
     } else {
         // Check for environment variable prefix (GIT_VAR=val git ...)
-        if parts[idx].contains('=') && parts[idx].chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+        if parts[idx].contains('=')
+            && parts[idx]
+                .chars()
+                .next()
+                .map(|c| c.is_uppercase())
+                .unwrap_or(false)
+        {
             idx += 1;
             // Skip multiple env vars
             while idx < parts.len() && parts[idx].contains('=') {
@@ -80,15 +86,17 @@ fn parse_git_invocation(leaf: &str, hook_cwd: &Path) -> Option<(String, PathBuf)
 
 /// Get the current branch name for a given cwd.
 /// Returns Some(branch_name) on success, None if:
+///
 /// - git command fails
 /// - detached HEAD (returned as "HEAD")
 /// - cwd is not a git repo
+///
 /// Fails closed: if branch lookup fails, return None.
 fn get_current_branch(cwd: &Path) -> Option<String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(cwd)
-        .args(&["rev-parse", "--abbrev-ref", "HEAD"])
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .output()
         .ok()?;
 
@@ -96,10 +104,7 @@ fn get_current_branch(cwd: &Path) -> Option<String> {
         return None;
     }
 
-    let branch = String::from_utf8(output.stdout)
-        .ok()?
-        .trim()
-        .to_string();
+    let branch = String::from_utf8(output.stdout).ok()?.trim().to_string();
 
     if branch.is_empty() {
         None
@@ -111,11 +116,7 @@ fn get_current_branch(cwd: &Path) -> Option<String> {
 /// Check if a git command would run on a protected branch.
 /// For commands with -C option, resolve the effective cwd and check that branch.
 /// If branch lookup fails or cwd is unresolvable, return true (fail-closed).
-fn is_on_protected_branch(
-    command: &str,
-    hook_cwd: &str,
-    protected_branches: &[String],
-) -> bool {
+fn is_on_protected_branch(command: &str, hook_cwd: &str, protected_branches: &[String]) -> bool {
     let hook_cwd_path = Path::new(hook_cwd);
 
     // Try to parse git invocation to get verb and effective cwd
@@ -191,7 +192,6 @@ pub fn check_rules_with_protected_branches(
     check_rules_internal(rules, input, protected_branches)
 }
 
-
 /// Check if a rule is tool-only (no regex or subagent fields set).
 /// Such rules match any input for the given tool name.
 fn is_tool_only_rule(rule: &Rule) -> bool {
@@ -233,7 +233,7 @@ fn check_rule_with_context(
         }
         "Glob" | "Grep" => {
             // Glob and Grep use "path" field, not "file_path".
-            // When "path" is omitted, Claude uses cwd instead, so
+            // When "path" is omitted, the tool uses cwd instead, so
             // fall back to cwd to avoid unnecessary passthroughs.
             let raw_path = input
                 .extract_field("path")
@@ -264,11 +264,11 @@ fn check_rule_with_context(
                 )
             {
                 // If protected_branch_check is set, verify we're on a protected branch
-                if let Some(true) = rule.protected_branch_check {
-                    if !is_on_protected_branch(&command, &input.cwd, protected_branches) {
-                        trace!("Rule matched but not on protected branch");
-                        return None;
-                    }
+                if let Some(true) = rule.protected_branch_check
+                    && !is_on_protected_branch(&command, &input.cwd, protected_branches)
+                {
+                    trace!("Rule matched but not on protected branch");
+                    return None;
                 }
                 return Some(format!(
                     "Matched rule for {} with command: {}",
@@ -279,10 +279,7 @@ fn check_rule_with_context(
         "Task" | "Agent" => {
             // Missing subagent_type: no match, falls through to passthrough.
             // This is fail-closed behavior -- unnamed agents require user approval.
-            let subagent_type = match input.extract_field("subagent_type") {
-                Some(st) => st,
-                None => return None,
-            };
+            let subagent_type = input.extract_field("subagent_type")?;
             if check_subagent_type(rule, &subagent_type) {
                 return Some(format!(
                     "Matched rule for {} with subagent_type: {}",
@@ -342,10 +339,7 @@ fn check_subagent_type(rule: &Rule, subagent_type: &str) -> bool {
     // Check regex match via subagent_type_regex field
     } else if let Some(ref regex) = rule.subagent_type_regex {
         if !regex.is_match(subagent_type) {
-            trace!(
-                "Subagent type didn't match regex. Got: {}",
-                subagent_type
-            );
+            trace!("Subagent type didn't match regex. Got: {}", subagent_type);
             return false;
         }
     } else {

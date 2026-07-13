@@ -1,0 +1,206 @@
+# Test configuration for integration tests
+# Paths and patterns are designed to match the test JSON files
+
+[audit]
+audit_file = "/tmp/claude-test-audit.json"
+audit_level = "off"
+passthrough_log_file = "/tmp/claude-test-passthrough.json"
+
+[variables]
+FILE_CMDS = "awk|cat|colordiff|comm|cut|diff|expand|file|fmt|fold|grep|head|join|nl|od|paste|pdftotext|rg|sed|seq|shuf|sort|tac|tail|tee|tr|unexpand|uniq|wc|xargs"
+FS_CMDS = "basename|chmod|cp|dirname|du|df|find|ls|mkdir|mktemp|readlink|realpath|stat|touch"
+SYS_CMDS = "date|done|du|echo|env|export|expr|false|for|id|nproc|numfmt|printenv|printf|pwd|sleep|sort|source|test|timeout|true|tty|uname|which|whoami"
+SAFE_CMDS = "${FILE_CMDS}|${FS_CMDS}|${SYS_CMDS}"
+NO_CMD_SUB = "`|\\$\\("
+
+NSH_PATH = "^/tmp/cck-test/"
+CLAUDE_PATH = "^/tmp/cck-test/\\.claude/"
+
+# Deny rules - checked first (take precedence)
+
+# Deny path traversal in Read operations
+[[deny]]
+tool = "Read"
+file_path_regex = ".*\\.\\./.*"
+
+# Deny rm commands anywhere in a command string
+[[deny]]
+tool = "Bash"
+command_regex = "\\brm\\b"
+
+# Deny sensitive file reads
+[[deny]]
+tool = "Read"
+file_path_regex = "\\.(env|secret)$"
+
+# Deny git commit - use \b word boundaries so flags between git and commit
+# are caught (e.g. "git --no-pager commit", "git -C /tmp commit")
+[[deny]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\bcommit\\b"
+
+# Deny git stash - same pattern
+[[deny]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\bstash\\b"
+
+# Deny git rm - catches "git rm file" and "git -C /path rm file"
+[[deny]]
+tool = "Bash"
+command_regex = ".*\\bgit\\b.*\\brm\\b"
+
+# Deny heredocs (<<EOF, <<'EOF', <<"EOF", <<-EOF, etc.)
+[[deny]]
+tool = "Bash"
+command_regex = "<<-?\\s*['\"]?\\w+"
+reason = "Do not use heredocs (<<EOF). Write code to a .py or .sh file instead."
+
+# Deny redundant bash -c / bash -lc wrappers inside the Bash tool
+[[deny]]
+tool = "Bash"
+command_regex = "^bash\\s+-[a-zA-Z]*c[a-zA-Z]*\\s+"
+reason = "bash -c / bash -lc is redundant inside the Bash tool. Run the command directly."
+
+# Deny find - use git ls-files or ls instead
+[[deny]]
+tool = "Bash"
+command_regex = "^find\\b"
+reason = "Use git ls-files '<pathspec>' or ls <dir> for file listing. For broad searches, write a _temp.py script with os.walk() or similar. find is denied to keep shell-side exploration bounded."
+
+# Deny cat/head/tail when reading files (has an absolute path argument)
+# The [^>|]*/ avoids matching paths in redirects like 'cat file >> /tmp/out'
+[[deny]]
+tool = "Bash"
+command_regex = "^(cat|head|tail)\\b[^>|]*/"
+reason = "Use the Read tool instead of cat/head/tail. Read supports offset and limit parameters for reading specific line ranges."
+
+# Deny grep/rg when searching files (has an absolute path argument)
+[[deny]]
+tool = "Bash"
+command_regex = "^(grep|rg)\\b.*\\s/\\S"
+reason = "Use piped grep/rg on bounded command output (e.g., git ls-files <pathspec> | grep pat), or read a single file with the Read tool and process it in a _temp.py script. grep/rg on file paths is denied to keep exploration bounded."
+
+# Deny sed -n for line extraction - use Read with offset and limit
+[[deny]]
+tool = "Bash"
+command_regex = "^sed\\s+-n\\b"
+reason = "Use the Read tool with offset and limit parameters instead of sed -n for extracting line ranges."
+
+# Deny destructive podman operations
+[[deny]]
+tool = "Bash"
+command_regex = "^podman\\s+(rm\\s+-f|rmi\\s+-f|kill|stop\\s+-t\\s*0|system\\s+prune|volume\\s+(rm|prune)|network\\s+(rm|prune)|image\\s+(rm|prune))\\b"
+reason = "Destructive podman operations are restricted. Ask the user."
+
+# Deny direct tsc via node_modules paths -- steer to 'npx tsc'
+[[deny]]
+tool = "Bash"
+command_regex = "\\bnode_modules/(\\.bin|typescript/bin)/tsc\\b"
+reason = "Use 'npx tsc' instead of calling tsc via node_modules paths. If 'npx tsc' fails because TypeScript is not installed, stop and tell the user: 'Please run: npm install --save-dev typescript'."
+
+# Deny hardcoded homebrew python -c (inline code)
+[[deny]]
+tool = "Bash"
+command_regex = "/opt/homebrew/bin/python3[^\\s]*\\s+-c\\b"
+reason = "Do not use /opt/homebrew/bin/python3 -c with inline code. Write a .py file and run it with 'source source_me.sh && python3 script.py' or 'python3 script.py'."
+
+# Allow rules - checked after deny rules
+
+# Allow reads within the Dropbox project directory
+[[allow]]
+tool = "Read"
+file_path_regex = "${NSH_PATH}.*"
+file_path_exclude_regex = "\\.\\."
+
+# Allow writes within the Dropbox project directory
+[[allow]]
+tool = "Write"
+file_path_regex = "${NSH_PATH}.*"
+file_path_exclude_regex = "\\.\\."
+
+# Allow edits within the Dropbox project directory
+[[allow]]
+tool = "Edit"
+file_path_regex = "${NSH_PATH}.*"
+file_path_exclude_regex = "\\.\\."
+
+# Allow Glob within the Dropbox project directory
+[[allow]]
+tool = "Glob"
+file_path_regex = "${NSH_PATH}"
+
+# Allow Grep within the Dropbox project directory
+[[allow]]
+tool = "Grep"
+file_path_regex = "${NSH_PATH}"
+
+# Allow homebrew python running .py files directly (but not -c)
+[[allow]]
+tool = "Bash"
+command_regex = "^/opt/homebrew/bin/python3[^\\s]*\\s+[^-]"
+command_exclude_regex = "\\s-c\\b|${NO_CMD_SUB}"
+
+# Write/Edit access to Claude internal files (~/.claude/)
+[[allow]]
+tool = "Write"
+file_path_regex = "${CLAUDE_PATH}"
+file_path_exclude_regex = "\\.\\."
+
+[[allow]]
+tool = "Edit"
+file_path_regex = "${CLAUDE_PATH}"
+file_path_exclude_regex = "\\.\\."
+
+# Allow safe cargo commands
+[[allow]]
+tool = "Bash"
+command_regex = "^cargo (build|test|check|clippy|fmt|run)"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow npx with whitelisted local dev tool packages
+[[allow]]
+tool = "Bash"
+command_regex = "^npx\\s+(tsc|eslint|prettier|playwright|esbuild)(\\s|$)"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow podman read-only inspection, build, compose, exec
+[[allow]]
+tool = "Bash"
+command_regex = "^podman\\s+(ps|pod|images|image\\s+ls|logs|inspect|info|version|port|top|stats|history|diff|build|compose|start|stop|restart|pull|tag|cp|exec)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow the exact 'npm install typescript' commands recommended by the tsc steering deny
+[[allow]]
+tool = "Bash"
+command_regex = "^npm\\s+install\\s+(--save-dev|-g)\\s+typescript\\s*$"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow git read-only subcommands (matches production .toml git allowlist)
+[[allow]]
+tool = "Bash"
+command_regex = "^git\\s+(-C\\s+\\S+\\s+)?(add|branch|check-ignore|checkout|diff|grep|ls-files|ls-tree|log|mv|pull|remote|restore|rev-parse|show|status|worktree)(\\s|$)"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow pip/python -m pip read-only info queries
+[[allow]]
+tool = "Bash"
+command_regex = "^(pip3?|python3?\\s+-m\\s+pip)\\s+(show|list|freeze|check)\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow common shell utilities (narrow exclude: blocks command substitution only)
+[[allow]]
+tool = "Bash"
+command_regex = "^(${SAFE_CMDS})\\b"
+command_exclude_regex = "${NO_CMD_SUB}"
+
+# Allow specific subagent types
+[[allow]]
+tool = "Task"
+subagent_type = "codebase-analyzer"
+
+# Tool-only rules (match any input for the tool)
+[[allow]]
+tool = "WebFetch"
+
+[[allow]]
+tool = "WebSearch"

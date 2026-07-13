@@ -232,7 +232,8 @@ mod tests {
         // parent exists (tmp), file does not
         let f = tmp.path().join("nope.txt");
         let input = make_input("Read", "file_path", f.to_str().unwrap(), "/");
-        let reason = check_path_exists(&input).expect("Read requires file, parent does not save it");
+        let reason =
+            check_path_exists(&input).expect("Read requires file, parent does not save it");
         assert!(reason.contains("does not exist"));
     }
 

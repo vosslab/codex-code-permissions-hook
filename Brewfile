@@ -1,4 +1,4 @@
-# Homebrew dependencies for claude-code-permissions-hook (macOS).
+# Homebrew dependencies for codex-code-permissions-hook (macOS).
 # Install with: brew bundle
 
 # Rust toolchain (cargo, rustc) for building the hook binary.

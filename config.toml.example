@@ -1,0 +1,16 @@
+# Copy this block into ~/.codex/config.toml.
+#
+# Hooks are enabled by default. If your existing config contains
+# `[features] hooks = false`, change that value to true.
+#
+# After adding or changing this hook, start Codex and run `/hooks` to review
+# and trust the exact command definition. Codex skips untrusted command hooks.
+
+[[hooks.PreToolUse]]
+matcher = "^(Bash|apply_patch|mcp__.*)$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "/Users/vosslab/nsh/codex-code-permissions-hook/target/release/codex-code-permissions-hook run --config /Users/vosslab/.config/codex-code-permissions-hook.toml"
+timeout = 30
+statusMessage = "Checking repository policy"

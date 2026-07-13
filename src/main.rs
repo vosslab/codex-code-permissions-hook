@@ -11,7 +11,8 @@ use std::path::PathBuf;
 
 use codex_code_permissions_hook::auditing::{audit_passthrough, audit_tool_use};
 use codex_code_permissions_hook::{
-    Decision, HookInput, HookOutput, load_config, process_hook_input_with_rules, validate_config,
+    Decision, HookInput, HookOutput, load_config,
+    process_hook_input_with_rules_and_protected_branches, validate_config,
 };
 
 #[derive(Debug, Parser)]
@@ -42,11 +43,12 @@ fn run_hook(config_path: PathBuf) -> Result<()> {
     let input = HookInput::read_from_stdin().context("Failed to read hook input")?;
 
     // Use pre-compiled rules to avoid recompiling regex on every call
-    let result = process_hook_input_with_rules(
+    let result = process_hook_input_with_rules_and_protected_branches(
         &deny_rules,
         &allow_rules,
         config.limits.max_chain_length,
         &input,
+        &config.git_protection.protected_branches,
     );
 
     // Audit the decision
@@ -59,10 +61,10 @@ fn run_hook(config_path: PathBuf) -> Result<()> {
     );
 
     // Log passthrough decisions to dedicated file when configured
-    if result.decision == Decision::Passthrough {
-        if let Some(ref pt_path) = config.audit.passthrough_log_file {
-            audit_passthrough(pt_path, &input);
-        }
+    if result.decision == Decision::Passthrough
+        && let Some(ref pt_path) = config.audit.passthrough_log_file
+    {
+        audit_passthrough(pt_path, &input);
     }
 
     // Output decision to stdout (passthrough = no output)
@@ -89,7 +91,10 @@ fn run_validate_config(config_path: PathBuf) -> Result<()> {
     let config = codex_code_permissions_hook::Config::load_from_file(&config_path)?;
 
     let total = deny_count + allow_count;
-    println!("Valid: loaded {} rules ({} deny, {} allow)", total, deny_count, allow_count);
+    println!(
+        "Valid: loaded {} rules ({} deny, {} allow)",
+        total, deny_count, allow_count
+    );
     println!("  Audit file:  {}", config.audit.audit_file.display());
     println!("  Audit level: {:?}", config.audit.audit_level);
 

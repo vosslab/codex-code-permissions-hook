@@ -71,10 +71,9 @@ struct PassthroughEntry {
     cwd: String,
 }
 
-/// Tools that are passthrough by design (Claude Code requires an interactive
-/// user dialog for these). They cannot be allow-rule-promoted, so logging
-/// them in the passthrough gap-finding log adds noise. Sorted alphabetically
-/// for greppability.
+/// Tools that are passthrough by design in the Claude compatibility profile.
+/// They cannot be promoted by its rules, so logging them as policy gaps adds
+/// noise. Codex does not emit these names, making this neutral for Codex runs.
 const DESIGN_PASSTHROUGH_TOOLS: &[&str] = &[
     "AskUserQuestion",
     "CronCreate",
@@ -95,8 +94,6 @@ const DESIGN_PASSTHROUGH_TOOLS: &[&str] = &[
 /// This log captures commands that matched neither allow nor deny rules,
 /// letting the operator identify rule gaps later.
 pub fn audit_passthrough(passthrough_path: &Path, input: &HookInput) {
-    // Skip tools that are passthrough by design; they would pollute the
-    // gap-finding log because they can never be promoted to an allow rule.
     if DESIGN_PASSTHROUGH_TOOLS.contains(&input.tool_name.as_str()) {
         return;
     }
@@ -306,7 +303,6 @@ mod tests {
 
         let tmp = NamedTempFile::new().expect("Failed to create temp file");
         let path = tmp.path().to_path_buf();
-
         let input = HookInput {
             session_id: "pt-session".to_string(),
             transcript_path: "/tmp/t".to_string(),
@@ -318,7 +314,6 @@ mod tests {
 
         audit_passthrough(&path, &input);
 
-        // File should remain empty (writer returned early).
         let content = std::fs::read_to_string(&path).expect("read");
         assert_eq!(content, "");
     }

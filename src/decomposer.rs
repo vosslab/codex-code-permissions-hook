@@ -58,7 +58,10 @@ pub fn decompose_command(command: &str) -> Vec<String> {
         }
     }
 
-    trace!("Decomposed into {} sub-commands (with $() extraction)", all_commands.len());
+    trace!(
+        "Decomposed into {} sub-commands (with $() extraction)",
+        all_commands.len()
+    );
     all_commands
 }
 
@@ -125,9 +128,7 @@ fn extract_from_command(cmd: &ast::Command) -> Vec<String> {
             }
             result
         }
-        ast::Command::Compound(compound, _redirect_list) => {
-            extract_from_compound_command(compound)
-        }
+        ast::Command::Compound(compound, _redirect_list) => extract_from_compound_command(compound),
         ast::Command::Function(_) => vec![],
         ast::Command::ExtendedTest(_) => vec![],
     }
@@ -139,7 +140,10 @@ fn extract_from_command(cmd: &ast::Command) -> Vec<String> {
 fn try_unwrap_bash_c(cmd: &ast::SimpleCommand) -> Option<String> {
     let name = cmd.word_or_name.as_ref()?;
     let name_val = name.value.as_str();
-    if !matches!(name_val, "bash" | "/bin/bash" | "/usr/bin/bash" | "/usr/local/bin/bash") {
+    if !matches!(
+        name_val,
+        "bash" | "/bin/bash" | "/usr/bin/bash" | "/usr/local/bin/bash"
+    ) {
         return None;
     }
 
@@ -404,11 +408,8 @@ fn simple_command_to_normalized(cmd: &ast::SimpleCommand) -> NormalizedCommand {
     // Suffix items (word arguments only)
     if let Some(ref suffix) = cmd.suffix {
         for item in &suffix.0 {
-            match item {
-                ast::CommandPrefixOrSuffixItem::Word(w) => {
-                    parts.push(w.value.clone());
-                }
-                _ => {} // skip IoRedirect, ProcessSubstitution
+            if let ast::CommandPrefixOrSuffixItem::Word(w) = item {
+                parts.push(w.value.clone());
             }
         }
     }
@@ -418,7 +419,6 @@ fn simple_command_to_normalized(cmd: &ast::SimpleCommand) -> NormalizedCommand {
         assignment_substitutions: assignment_subs,
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -654,9 +654,7 @@ mod tests {
     #[test]
     fn test_for_loop_plain_values_no_cmd_sub() {
         // for loop with plain values (no $()) should not produce extra leaves
-        let result = decompose_command(
-            "for locale in cs de fr; do echo $locale; done",
-        );
+        let result = decompose_command("for locale in cs de fr; do echo $locale; done");
         assert_eq!(result, vec!["echo $locale"]);
     }
 
