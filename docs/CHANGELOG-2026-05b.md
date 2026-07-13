@@ -26,7 +26,7 @@
 
 ### Fixes and Maintenance
 
-- Fixed 83 markdown link errors flagged by `tests/test_markdown_links.py` across `docs/CHANGELOG.md`, `docs/CHANGELOG-2026-05a.md`, `docs/CODE_ARCHITECTURE.md`, `docs/CONFIGURATION_GUIDE.md`, `docs/FILE_STRUCTURE.md`, `docs/INSTALL.md`, `docs/USAGE.md`, and `tests/README.md`. Three failure modes: (1) path-like link text mismatched URL or basename (e.g. `[docs/REPO_STYLE.md](REPO_STYLE.md)` from inside `docs/` -- text rewritten to bare basename per [MARKDOWN_STYLE.md](MARKDOWN_STYLE.md) same-folder rule); (2) broken targets (`docs/WORKTREE_POLICY.md` from inside `docs/` resolved to `docs/docs/...`; lowercase `configuration-guide.md`/`tool-input-schemas.md` -- repointed at the SCREAMING_SNAKE_CASE files that exist); (3) historical changelog references to nonexistent files (`tests/test_hook.py`) and directory-only links (`[src/](../src/)`) converted to inline backticks since the test rejects directory targets and missing-file targets.
+- Fixed 83 markdown link errors flagged by `tests/test_markdown_links.py` across `docs/CHANGELOG.md`, `docs/CHANGELOG-2026-05a.md`, `docs/CODE_ARCHITECTURE.md`, `docs/CONFIGURATION_GUIDE.md`, `docs/FILE_STRUCTURE.md`, `docs/INSTALL.md`, `docs/USAGE.md`, and `tests/README.md`. Three failure modes: (1) path-like link text mismatched URL or basename (e.g. `[REPO_STYLE.md](REPO_STYLE.md)` from inside `docs/` -- text rewritten to bare basename per [MARKDOWN_STYLE.md](MARKDOWN_STYLE.md) same-folder rule); (2) broken targets (`docs/WORKTREE_POLICY.md` from inside `docs/` resolved to `docs/docs/...`; lowercase `configuration-guide.md`/`tool-input-schemas.md` -- repointed at the SCREAMING_SNAKE_CASE files that exist); (3) historical changelog references to nonexistent files (`tests/test_hook.py`) and directory-only links (``src``) converted to inline backticks since the test rejects directory targets and missing-file targets.
 
 ### Behavior or Interface Changes
 
@@ -496,7 +496,7 @@ force push) and at the OS layer. Maintainer-facing detail in
 
 ### Documentation
 
-- Updated [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md):
+- Updated `CLAUDE_HOOK_USAGE_GUIDE.md`:
   added `pdftotext` to safe utilities, added `esbuild` to the npx whitelist
   section, added a new "Podman (containers)" section under Allowed commands,
   added a new "`tsc` via `node_modules` paths" entry under Denied commands.
@@ -635,7 +635,7 @@ force push) and at the OS layer. Maintainer-facing detail in
   (e.g. `tools/runner.py`) now match allow rules
 - `open`, `which`, `type` added to `FS_CMDS`; `find` removed (has deny-and-steer rule)
 - Improved section comments across all TOML rule groups documenting trust rationale
-- Updated [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md) and
+- Updated `CLAUDE_HOOK_USAGE_GUIDE.md` and
   [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) with new trust model
 
 ### Behavior or Interface Changes
@@ -668,7 +668,7 @@ force push) and at the OS layer. Maintainer-facing detail in
 
 ### Previous entries for 2026-03-26
 
-- Updated [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md) to reflect
+- Updated `CLAUDE_HOOK_USAGE_GUIDE.md` to reflect
   restructured permissions model: added trust model philosophy, env-var assignment
   decomposer behavior, new "Local runtimes" section with node/deno/npx details,
   npm read-only commands, expanded denied commands (sudo, git reset --hard,
@@ -718,7 +718,7 @@ force push) and at the OS layer. Maintainer-facing detail in
 
 ### Additions and New Features
 
-- Created [CLAUDE_HOOK_USAGE_GUIDE.md](CLAUDE_HOOK_USAGE_GUIDE.md): comprehensive
+- Created `CLAUDE_HOOK_USAGE_GUIDE.md`: comprehensive
   best-practices guide for AI agents working in repos that use the permissions hook.
   Covers allowed/denied/passthrough commands, file access zones, safe utility lists,
   common patterns cheat sheet, and preferred alternatives for every deny rule. Sourced

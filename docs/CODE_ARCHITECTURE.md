@@ -9,19 +9,19 @@ invocation uses.
 
 ## Major components
 
-- [src/main.rs](../src/main.rs) defines the `run` and `validate` CLI commands.
-- [src/hook_io.rs](../src/hook_io.rs) parses lifecycle JSON from standard input
+- [main.rs](../src/main.rs) defines the `run` and `validate` CLI commands.
+- [hook_io.rs](../src/hook_io.rs) parses lifecycle JSON from standard input
   and serializes hook decisions. It accepts Codex's nullable
   `transcript_path` and ignores forward-compatible input fields.
-- [src/config.rs](../src/config.rs) loads TOML, expands environment and reusable
+- [config.rs](../src/config.rs) loads TOML, expands environment and reusable
   regex variables, and compiles allow and deny rules.
-- [src/decomposer.rs](../src/decomposer.rs) parses compound Bash input into leaf
+- [decomposer.rs](../src/decomposer.rs) parses compound Bash input into leaf
   commands so each operation receives a separate policy decision.
-- [src/matcher.rs](../src/matcher.rs) matches tool names and input fields. Bash
+- [matcher.rs](../src/matcher.rs) matches tool names and input fields. Bash
   and Codex `apply_patch` calls both expose `tool_input.command`.
-- [src/path_check.rs](../src/path_check.rs) preserves path-existence checks for
+- [path_check.rs](../src/path_check.rs) preserves path-existence checks for
   Claude file tools. Codex Bash, `apply_patch`, and MCP calls skip those checks.
-- [src/auditing.rs](../src/auditing.rs) writes bounded JSON Lines audit records
+- [auditing.rs](../src/auditing.rs) writes bounded JSON Lines audit records
   with file locking.
 
 ## Policy profiles
@@ -46,18 +46,18 @@ invocation uses.
 - `cargo test` runs unit, integration, and protected-branch tests.
 - [config_test.sh](../config_test.sh) builds the release binary and validates
   both root policies.
-- [tests/command_decisions.tsv](../tests/command_decisions.tsv) is the larger
+- [command_decisions.tsv](../tests/command_decisions.tsv) is the larger
   behavior fixture corpus used by
-  [tools/run_command_decisions.py](../tools/run_command_decisions.py).
+  [run_command_decisions.py](../tools/run_command_decisions.py).
 - Python repository checks run with `source source_me.sh && pytest tests/`.
 
 ## Extension points
 
-- Add new rule fields and validation in [src/config.rs](../src/config.rs).
-- Add tool-input matching behavior in [src/matcher.rs](../src/matcher.rs).
-- Add shell parsing behavior in [src/decomposer.rs](../src/decomposer.rs).
-- Add platform protocol fields in [src/hook_io.rs](../src/hook_io.rs).
-- Add policy behavior fixtures under [tests/](../tests/).
+- Add new rule fields and validation in [config.rs](../src/config.rs).
+- Add tool-input matching behavior in [matcher.rs](../src/matcher.rs).
+- Add shell parsing behavior in [decomposer.rs](../src/decomposer.rs).
+- Add platform protocol fields in [hook_io.rs](../src/hook_io.rs).
+- Add policy behavior fixtures under `tests`.
 
 ## Known gaps
 

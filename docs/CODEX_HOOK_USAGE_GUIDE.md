@@ -4,7 +4,7 @@ This project provides a deterministic `PreToolUse` policy hook for Codex. It
 evaluates Bash commands, `apply_patch` calls, and supported MCP calls against
 ordered deny and allow rules in a TOML policy file.
 
-The checked-in [Codex hook reference](../codex-hook-guide.md) is the source for
+The checked-in [Codex hook reference](codex-hook-guide.md) is the source for
 the lifecycle protocol used by this implementation. The current online version
 is available at <https://learn.chatgpt.com/docs/hooks>.
 

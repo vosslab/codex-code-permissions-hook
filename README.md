@@ -23,8 +23,13 @@ Rust permission hook for Codex that decomposes compound shell commands and decid
 - [docs/CODE_ARCHITECTURE.md](docs/CODE_ARCHITECTURE.md) - high-level design, modules, and data flow.
 - [docs/FILE_STRUCTURE.md](docs/FILE_STRUCTURE.md) - directory map and what belongs where.
 - [docs/TOOL_INPUT_SCHEMAS.md](docs/TOOL_INPUT_SCHEMAS.md) - Claude compatibility tool-input schemas.
-- [codex-hook-guide.md](codex-hook-guide.md) - saved upstream Codex hook reference.
+- [docs/FILE_FORMATS.md](docs/FILE_FORMATS.md) - hook JSON, policy TOML, and audit JSON Lines formats.
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - common setup and policy-diagnosis steps.
+- [docs/RELATED_PROJECTS.md](docs/RELATED_PROJECTS.md) - upstream template and platform references.
+- [docs/codex-hook-guide.md](docs/codex-hook-guide.md) - saved upstream Codex hook reference.
 - [docs/CHANGELOG.md](docs/CHANGELOG.md) - dated record of changes, decisions, and failures.
+- [docs/NEWS.md](docs/NEWS.md) - recent highlights.
+- [docs/RELEASE_HISTORY.md](docs/RELEASE_HISTORY.md) - compact release summary.
 
 ### Repo standards
 
@@ -33,6 +38,7 @@ Rust permission hook for Codex that decomposes compound shell commands and decid
 - [docs/PYTHON_STYLE.md](docs/PYTHON_STYLE.md) - Python style for tooling under `tools/` and `tests/`.
 - [docs/PYTEST_STYLE.md](docs/PYTEST_STYLE.md) - pytest test-writing rules and failure triage.
 - [docs/MARKDOWN_STYLE.md](docs/MARKDOWN_STYLE.md) - Markdown rules for this repo.
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - local maintenance and release workflow.
 
 ## Testing
 

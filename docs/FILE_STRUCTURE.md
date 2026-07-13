@@ -12,13 +12,13 @@ codex-code-permissions-hook/
 +- Cargo.toml                        Rust package manifest
 +- codex-code-permissions-hook.toml  Codex policy profile
 +- config.toml.example               Codex config hook example
-+- codex-hook-guide.md               Saved upstream Codex hook reference
++- docs/codex-hook-guide.md          Saved upstream Codex hook reference
 `- README.md                         Project entry point
 ```
 
 ## Key subtrees
 
-### [src/](../src/)
+### `src`
 
 - `main.rs`: CLI entry point.
 - `hook_io.rs`: lifecycle JSON protocol.
@@ -29,7 +29,7 @@ codex-code-permissions-hook/
 - `auditing.rs`: JSON Lines audit output.
 - `lib.rs`: shared processing API.
 
-### [tests/](../tests/)
+### `tests`
 
 - Rust integration files exercise public APIs and protected branches.
 - `command_decisions.tsv` stores end-to-end policy cases.
@@ -38,7 +38,7 @@ codex-code-permissions-hook/
 - Python tests verify repository hygiene, Markdown, TOML, and source quality.
 - `playwright/` contains browser-test support.
 
-### [tools/](../tools/)
+### `tools`
 
 - `run_command_decisions.py` runs the TSV corpus against the release binary.
 - `check_plan_mode_enforcement.py` remains a Claude-specific compatibility
@@ -53,14 +53,20 @@ codex-code-permissions-hook/
 
 ## Documentation map
 
-- [docs/CODEX_HOOK_USAGE_GUIDE.md](CODEX_HOOK_USAGE_GUIDE.md): Codex lifecycle,
+- [CODEX_HOOK_USAGE_GUIDE.md](CODEX_HOOK_USAGE_GUIDE.md): Codex lifecycle,
   trust and registration workflow.
-- [docs/CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md): policy schema and rule
+- [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md): policy schema and rule
   authoring.
-- [docs/INSTALL.md](INSTALL.md): build and hook setup.
-- [docs/USAGE.md](USAGE.md): CLI examples.
-- [docs/CODE_ARCHITECTURE.md](CODE_ARCHITECTURE.md): processing design.
-- [docs/CHANGELOG.md](CHANGELOG.md): current change history.
+- [INSTALL.md](INSTALL.md): build and hook setup.
+- [USAGE.md](USAGE.md): CLI examples.
+- [CODE_ARCHITECTURE.md](CODE_ARCHITECTURE.md): processing design.
+- [CHANGELOG.md](CHANGELOG.md): current change history.
+- [DEVELOPMENT.md](DEVELOPMENT.md): local maintenance workflow.
+- [FILE_FORMATS.md](FILE_FORMATS.md): JSON, TOML, and audit-record formats.
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md): setup and policy diagnosis.
+- [RELATED_PROJECTS.md](RELATED_PROJECTS.md): upstream and platform references.
+- [NEWS.md](NEWS.md) and [RELEASE_HISTORY.md](RELEASE_HISTORY.md): recent and
+  compact release summaries.
 
 ## Where to add new work
 

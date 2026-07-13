@@ -2,7 +2,7 @@
 
 This document is retained for the Claude compatibility profile. Codex hook
 inputs are documented in [CODEX_HOOK_USAGE_GUIDE.md](CODEX_HOOK_USAGE_GUIDE.md)
-and the saved [upstream hook reference](../codex-hook-guide.md).
+and the saved [upstream hook reference](codex-hook-guide.md).
 
 This document describes the `tool_input` JSON schemas for Claude Code's built-in tools. These schemas are relevant when writing PreToolUse hooks that need to inspect or match against tool inputs.
 
