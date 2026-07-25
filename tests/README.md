@@ -13,9 +13,8 @@ command permissions hook.
   Read/Write/Edit/Glob/Grep allow zone is the `/tmp/cck-test/` tree, which the
   decision-table runner materializes before evaluating.
 - `command_decisions.tsv` - Decision-table regression corpus (allow / deny /
-  passthrough per tool input) covering Bash and non-Bash tools. This corpus is
-  the authoritative allow/deny/passthrough coverage and supersedes the older
-  per-case JSON hook-input fixtures.
+  passthrough per tool input) covering Bash and non-Bash tools. This corpus
+  supersedes the older per-case JSON hook-input fixtures.
 - `command_decisions.tsv` is run by [run_command_decisions.py](../tools/run_command_decisions.py); the runner lives in `tools/` since it is operational tooling, not a pytest file
 
 ## Running Tests

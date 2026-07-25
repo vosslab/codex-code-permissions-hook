@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-07-24
+
+### Additions and New Features
+
+- Added configurable `deny_mode` behavior with `enforce` as the compatibility
+  default and `disabled` for the experimental Codex logging phase.
+
+### Behavior or Interface Changes
+
+- Set the active Codex policy to `deny_mode = "disabled"` while retaining
+  `audit_level = "all"` and `/tmp/codex-tool-use.json`.
+- Disabled Codex deny-rule, path-check, structural-guard, and command-chain
+  enforcement. Complete corpus-backed allow matches return allow; every other
+  active-profile call returns passthrough. Neither result emits denial JSON.
+- Enabled the existing `PreToolUse` registration in `~/.codex/config.toml` so
+  the experimental policy can begin collecting supported Codex hook events
+  after Codex reviews and trusts the changed hook definition.
+
+### Fixes and Maintenance
+
+- Updated the Codex guide, configuration reference, architecture, file-format,
+  usage, troubleshooting, README, and corpus documentation for all-event
+  logging with disabled denies.
+- Updated the reviewed semantic Claude/Codex policy patch with the Codex-only
+  deny-disable setting.
+- Restored the decision corpus to exactly three outcomes. Reclassified the 546
+  former Codex deny rows by current runtime behavior: 74 are allow and 472 are
+  passthrough.
+
+### Decisions and Failures
+
+- Confirmed that policy decisions have exactly three classes: allow,
+  passthrough, and deny. Logging every intercepted command is independent of
+  classification and does not create an observe class.
+- Retained the dormant deny rules in the profile so reviewed rules can be
+  implemented selectively after the logging phase.
+- Kept enforcement as the schema default so the Claude compatibility and
+  synthetic test profiles preserve their established behavior.
+- Codex `PreToolUse` still covers only the tool categories exposed by the Codex
+  hook API; `audit_level = "all"` means every event reaching this hook, not
+  every internal Codex operation.
+
+### Developer Tests and Notes
+
+- `./config_test.sh` passes all 119 Rust tests, validates the active
+  configuration and reviewed semantic policy difference, and passes all 1,265
+  command-decision corpus cases.
+- `source source_me.sh && python3 -m pytest tests/` passes all 550 Python tests.
+
 ## 2026-07-13
 
 ### Additions and New Features

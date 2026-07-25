@@ -43,8 +43,9 @@ printf '%s' '{"session_id":"test","transcript_path":null,"cwd":"/tmp","hook_even
       --config codex-code-permissions-hook.toml
 ```
 
-An allow or deny match produces Codex hook JSON. A passthrough result produces
-no standard output and preserves Codex's normal approval flow.
+The active Codex profile produces no standard output because deny rules are
+disabled and its classifications are allow or passthrough. Both preserve
+Codex's normal approval flow.
 
 ## Validate the policy
 
@@ -64,10 +65,13 @@ source source_me.sh && python3 tools/run_command_decisions.py
 
 - Input: one `PreToolUse` JSON object on standard input.
 - Policy: the TOML path supplied with `--config`.
-- Standard output: hook-specific JSON for deny; empty for allow and passthrough.
-- Audit output: JSON Lines at the paths configured under `[audit]`.
+- Standard output: empty for allow and passthrough; enforcing profiles emit JSON
+  for deny.
+- Audit output: every intercepted call is written as JSON Lines to
+  `/tmp/codex-tool-use.json`.
 
-## Known gaps
+The corpus uses three expected outcomes:
 
-- TODO: verify the decision fixture runner's cross-profile expectations after
-  every intentional divergence between the Claude and Codex policies.
+- `allow`: every command leaf matched the allow policy.
+- `passthrough`: no complete allow match.
+- `deny`: an enforcing test profile returned a denial.

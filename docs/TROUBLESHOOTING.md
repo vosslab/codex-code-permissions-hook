@@ -23,8 +23,8 @@ or a command decision differs from expectation.
 
 - Add a focused row to [command_decisions.tsv](../tests/command_decisions.tsv)
   and replay it with `./config_test.sh`.
-- Remember that deny rules run before allow rules and compound Bash input is
-  processed as leaf commands.
+- Remember that the active Codex profile disables deny rules and processes
+  compound Bash input as leaf commands for allow classification.
 - A passthrough result deliberately writes no standard output; inspect the
   configured audit files when an unmatched command needs investigation.
 

@@ -16,6 +16,9 @@ audit_file = "/tmp/codex-tool-use.json"
 audit_level = "all"
 passthrough_log_file = "/tmp/codex-passthrough.json"
 
+[policy]
+deny_mode = "disabled"
+
 [limits]
 max_chain_length = 5
 
@@ -27,13 +30,15 @@ protected_refs = ["refs/heads/main", "refs/heads/master"]
 WORKSPACE_ROOT = "nsh"
 ```
 
-`audit_level` accepts `off`, `matched`, or `all`. A zero
+`audit_level` accepts `off`, `matched`, or `all`. `deny_mode` accepts `enforce`
+or `disabled`; disabled skips deny rules during classification. A zero
 `max_chain_length` disables the compound-command limit.
 
 ## Rules
 
-Rules are repeated `[[deny]]` or `[[allow]]` tables. Deny rules always run
-first. A rule needs either an exact `tool` or `tool_regex`.
+Rules are repeated `[[deny]]` or `[[allow]]` tables. Deny rules run first in
+`enforce` mode and are skipped in `disabled` mode. A rule needs either an exact
+`tool` or `tool_regex`.
 
 ```toml
 [[deny]]
@@ -54,7 +59,7 @@ Supported matcher fields include:
 - `subagent_type`, `subagent_type_regex`, and exclusions for Claude agent calls.
 - `prompt_regex` and `prompt_exclude_regex` for supported Claude agent rules.
 - `protected_branch_check` for branch-aware Git rules.
-- `reason` for a clear model-visible denial or allow explanation.
+- `reason` for a clear denial or allow explanation.
 
 Unknown fields are rejected so misspelled rules fail during validation.
 
@@ -102,10 +107,11 @@ validation.
 
 1. The exact or regex tool name must match.
 2. Exclusion regexes disqualify a rule.
-3. Deny matches return immediately.
-4. Bash input is decomposed into leaf commands.
-5. Every Bash leaf must match an allow rule for the whole call to be allowed.
-6. No match returns passthrough with no standard output.
+3. In `enforce` mode, a deny match returns immediately.
+4. In `disabled` mode, deny rules are skipped.
+5. Bash input is decomposed into leaf commands.
+6. Every Bash leaf must match an allow rule for the whole call to be allowed.
+7. No allow match returns passthrough with no standard output.
 
 For deny rules, write a positive recovery path in `reason`. Prefer concrete
 commands or tools that are actually available on the selected platform.

@@ -1,8 +1,8 @@
 # Codex Hook Usage Guide
 
-This project provides a deterministic `PreToolUse` policy hook for Codex. It
-evaluates Bash commands, `apply_patch` calls, and supported MCP calls against
-ordered deny and allow rules in a TOML policy file.
+This project provides an experimental `PreToolUse` policy hook for Codex. It
+logs intercepted Bash commands, `apply_patch` calls, and supported MCP calls
+while classifying them against corpus-backed allow rules.
 
 The checked-in [Codex hook reference](codex-hook-guide.md) is the source for
 the lifecycle protocol used by this implementation. The current online version
@@ -19,13 +19,14 @@ The hook returns one of three outcomes:
 
 | Policy result | Codex behavior |
 | --- | --- |
-| Deny | Emits a Codex `PreToolUse` denial with a reason. |
+| Deny | Emits a denial only when the selected profile enforces deny rules. |
 | Allow | Emits no output, preserving Codex's normal permission flow. |
 | Passthrough | Emits no output, preserving Codex's normal permission flow. |
 
-Deny rules take precedence. A compound Bash command is decomposed into simple
-commands; every component must match an allow rule for the entire call to be
-allowed.
+The active Codex profile uses `deny_mode = "disabled"`, so deny rules do not
+participate in classification. A compound Bash command is decomposed into
+simple commands; every component must match an allow rule for the entire call
+to be classified as allow. Other calls pass through.
 
 ## Build
 
@@ -77,9 +78,11 @@ complete security boundary.
 
 ## Audit files
 
-Matched decisions are written as JSON Lines when `audit_level = "matched"`.
-Use `audit_level = "all"` to include passthrough calls or `"off"` to disable the
-main audit log. The optional passthrough log is useful for finding policy gaps.
+The active Codex profile uses `audit_level = "all"` and writes every intercepted
+call to `/tmp/codex-tool-use.json` as JSON Lines, independent of whether its
+decision is allow, passthrough, or deny. Use `audit_level = "matched"` for
+matched calls only or `"off"` to disable the main audit log. The optional
+passthrough log is useful for finding allow-policy gaps.
 
 Long strings in audit entries are truncated. Audit write failures are logged as
 warnings and do not crash Codex.
@@ -97,5 +100,6 @@ printf '%s' '{"session_id":"test","transcript_path":null,"cwd":"/tmp","hook_even
       --config codex-code-permissions-hook.toml
 ```
 
-The second command should return a JSON denial. A command matching neither deny
-nor allow rules should exit successfully without standard output.
+The second command should exit successfully without standard output and write
+an audit record with decision `passthrough`. A command matching no allow rule
+also exits successfully without standard output.

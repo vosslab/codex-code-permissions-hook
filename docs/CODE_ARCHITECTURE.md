@@ -4,8 +4,8 @@
 
 This repository builds one Rust policy engine that can process `PreToolUse`
 events from Codex and Claude Code. The two root TOML policies share one schema
-but use tool-specific rule sets. A stable symlink selects which policy a hook
-invocation uses.
+but use tool-specific rule sets. Each hook invocation selects its policy with
+an explicit `--config` path.
 
 ## Major components
 
@@ -37,10 +37,12 @@ invocation uses.
 1. Codex or Claude Code launches the binary with `run --config <path>`.
 2. The binary reads one `PreToolUse` JSON object from standard input.
 3. The selected TOML profile is loaded and compiled.
-4. Bash commands are decomposed; deny rules run before allow rules.
-5. A deny match produces hook-specific JSON. Allow and passthrough results
-   produce no standard output and leave Codex's normal permission flow intact.
-6. The configured audit files receive the bounded event record.
+4. The active Codex profile skips deny rules, then decomposes Bash commands for
+   allow-rule evaluation.
+5. Complete allow matches return allow; every other active-profile call returns
+   passthrough. Both produce no standard output.
+6. Every intercepted Codex event is written to the configured bounded audit
+   log independent of its classification.
 
 ## Testing and verification
 

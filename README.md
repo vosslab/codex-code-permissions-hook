@@ -1,11 +1,12 @@
-Rust permission hook for Codex that decomposes compound shell commands and decides allow, deny, or passthrough against TOML rules while preserving the established Claude hook workflow and configuration format.
+Experimental Rust policy hook for Codex that logs every intercepted tool call and currently classifies calls as allow or passthrough while deny rules are disabled.
 
 # codex-code-permissions-hook
 
 ## Quick start
 
 1. Build the binary: `cargo build --release`. The hook reads JSON on stdin and writes a JSON decision on stdout, ready to wire into Codex `PreToolUse`.
-2. Edit the root `codex-code-permissions-hook.toml`, which retains the established Claude policy format.
+2. Edit the root `codex-code-permissions-hook.toml`, which currently uses
+   `deny_mode = "disabled"` and logs every call to `/tmp/codex-tool-use.json`.
 3. Validate any config edit: `./target/release/codex-code-permissions-hook validate --config codex-code-permissions-hook.toml`.
 4. Copy the hook block from [config.toml.example](config.toml.example) into `~/.codex/config.toml`, then review it with `/hooks`.
 

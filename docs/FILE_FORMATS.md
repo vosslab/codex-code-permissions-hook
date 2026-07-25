@@ -24,10 +24,12 @@ optional JSON decisions, and writes JSON Lines audit records.
 
 ## Hook output JSON
 
-- A deny match emits Codex hook JSON containing the decision and its reason.
-- Allow and passthrough decisions emit no standard output, preserving Codex's
-  normal permission flow. Codex accepts a `PreToolUse` allow response only when
-  it includes an `updatedInput` rewrite, which this hook does not perform.
+- The active Codex profile disables deny rules and emits no standard output.
+- An enforcing profile emits Codex hook JSON for a deny decision and its reason.
+- Allow and passthrough decisions also emit no standard output, preserving
+  Codex's normal permission flow. Codex accepts a `PreToolUse` allow response
+  only when it includes an `updatedInput` rewrite, which this hook does not
+  perform.
 
 ## Audit JSON Lines
 

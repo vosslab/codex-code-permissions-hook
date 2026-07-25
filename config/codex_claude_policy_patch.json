@@ -299,6 +299,9 @@
       "limits": {
         "max_chain_length": 5
       },
+      "policy": {
+        "deny_mode": "disabled"
+      },
       "variables": {
         "BUILD_OUT": "\\.build/|target/(?:debug|release)/",
         "CHECKSUM_CMDS": "md5|md5sum|shasum|sha256sum",

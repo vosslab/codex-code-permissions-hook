@@ -11,8 +11,7 @@ use std::path::PathBuf;
 
 use codex_code_permissions_hook::auditing::{audit_passthrough, audit_tool_use};
 use codex_code_permissions_hook::{
-    Decision, HookInput, HookOutput, load_config,
-    process_hook_input_with_rules_and_protected_branches, validate_config,
+    Decision, HookInput, HookOutput, load_config, process_hook_input_with_policy, validate_config,
 };
 
 #[derive(Debug, Parser)]
@@ -49,10 +48,11 @@ fn run_hook(config_path: PathBuf) -> Result<()> {
     let input = HookInput::read_from_stdin().context("Failed to read hook input")?;
 
     // Use pre-compiled rules to avoid recompiling regex on every call
-    let result = process_hook_input_with_rules_and_protected_branches(
+    let result = process_hook_input_with_policy(
         &deny_rules,
         &allow_rules,
         config.limits.max_chain_length,
+        config.policy.deny_mode,
         &input,
         &config.git_protection.protected_branches,
     );
@@ -95,6 +95,7 @@ fn run_validate_config(config_path: PathBuf) -> Result<()> {
     );
     println!("  Audit file:  {}", config.audit.audit_file.display());
     println!("  Audit level: {:?}", config.audit.audit_level);
+    println!("  Deny mode:   {:?}", config.policy.deny_mode);
 
     Ok(())
 }
@@ -103,10 +104,11 @@ fn run_evaluate(config_path: PathBuf) -> Result<()> {
     let (config, deny_rules, allow_rules) =
         load_config(&config_path).context("Failed to load configuration")?;
     let input = HookInput::read_from_stdin().context("Failed to read hook input")?;
-    let result = process_hook_input_with_rules_and_protected_branches(
+    let result = process_hook_input_with_policy(
         &deny_rules,
         &allow_rules,
         config.limits.max_chain_length,
+        config.policy.deny_mode,
         &input,
         &config.git_protection.protected_branches,
     );
