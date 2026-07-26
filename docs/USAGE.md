@@ -38,14 +38,14 @@ target/release/codex-code-permissions-hook run --help
 ## Process a Codex event
 
 ```bash
-printf '%s' '{"session_id":"test","transcript_path":null,"cwd":"/tmp","hook_event_name":"PreToolUse","turn_id":"turn","tool_name":"Bash","tool_use_id":"tool","tool_input":{"command":"git status"},"model":"gpt-5","permission_mode":"default"}' \
+printf '%s' '{"session_id":"test","transcript_path":null,"cwd":"/tmp","hook_event_name":"PreToolUse","turn_id":"turn","tool_name":"Bash","tool_use_id":"tool","tool_input":{"command":"pwd"},"model":"gpt-5","permission_mode":"default"}' \
   | target/release/codex-code-permissions-hook run \
       --config codex-code-permissions-hook.toml
 ```
 
-The active Codex profile produces no standard output because deny rules are
-disabled and its classifications are allow or passthrough. Both preserve
-Codex's normal approval flow.
+The active Codex profile produces no standard output for allow and passthrough.
+A deny emits a JSON reason immediately instead of entering Codex's normal
+approval flow.
 
 ## Validate the policy
 
@@ -65,8 +65,7 @@ source source_me.sh && python3 tools/run_command_decisions.py
 
 - Input: one `PreToolUse` JSON object on standard input.
 - Policy: the TOML path supplied with `--config`.
-- Standard output: empty for allow and passthrough; enforcing profiles emit JSON
-  for deny.
+- Standard output: empty for allow and passthrough; deny emits JSON.
 - Audit output: every intercepted call is written as JSON Lines to
   `/tmp/codex-tool-use.json`.
 
@@ -74,4 +73,4 @@ The corpus uses three expected outcomes:
 
 - `allow`: every command leaf matched the allow policy.
 - `passthrough`: no complete allow match.
-- `deny`: an enforcing test profile returned a denial.
+- `deny`: a deny rule or command-chain limit returned a denial.

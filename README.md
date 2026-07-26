@@ -1,12 +1,12 @@
-Experimental Rust policy hook for Codex that logs every intercepted tool call and currently classifies calls as allow or passthrough while deny rules are disabled.
+Rust policy hook for Codex that classifies intercepted tool calls as allow, deny, or passthrough and logs them for policy tuning.
 
 # codex-code-permissions-hook
 
 ## Quick start
 
 1. Build the binary: `cargo build --release`. The hook reads JSON on stdin and writes a JSON decision on stdout, ready to wire into Codex `PreToolUse`.
-2. Edit the root `codex-code-permissions-hook.toml`, which currently uses
-   `deny_mode = "disabled"` and logs every call to `/tmp/codex-tool-use.json`.
+2. Edit the root `codex-code-permissions-hook.toml`, which enforces its deny
+   rules and logs every intercepted call to `/tmp/codex-tool-use.json`.
 3. Validate any config edit: `./target/release/codex-code-permissions-hook validate --config codex-code-permissions-hook.toml`.
 4. Copy the hook block from [config.toml.example](config.toml.example) into `~/.codex/config.toml`, then review it with `/hooks`.
 

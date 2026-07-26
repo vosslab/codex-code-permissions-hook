@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 pub use auditing::Decision;
-pub use config::{Config, DenyMode, Rule};
+pub use config::{Config, Rule};
 pub use hook_io::{HookInput, HookOutput};
 pub use matcher::{check_rules, check_rules_with_protected_branches};
 
@@ -93,7 +93,6 @@ pub fn process_hook_input_with_config(config: &Config, input: &HookInput) -> Res
         &deny_rules,
         &allow_rules,
         config.limits.max_chain_length,
-        config.policy.deny_mode,
         input,
         &config.git_protection.protected_branches,
     ))
@@ -104,7 +103,6 @@ fn process_hook_input_with_rules_and_context(
     deny_rules: &[Rule],
     allow_rules: &[Rule],
     max_chain_length: usize,
-    deny_mode: DenyMode,
     input: &HookInput,
     protected_branches: &[String],
 ) -> HookResult {
@@ -115,20 +113,16 @@ fn process_hook_input_with_rules_and_context(
         // Check the original full command against deny rules first.
         // This catches patterns (like heredocs) that the decomposer
         // strips when extracting leaf commands.
-        if deny_mode == DenyMode::Enforce
-            && let Some(reason) =
-                check_rules_with_protected_branches(deny_rules, input, protected_branches)
+        if let Some(reason) =
+            check_rules_with_protected_branches(deny_rules, input, protected_branches)
         {
             return HookResult::deny(reason);
         }
 
         let sub_commands = decomposer::decompose_command(&command);
 
-        // Chain length limit: flag overly complex compound commands.
-        if deny_mode == DenyMode::Enforce
-            && max_chain_length > 0
-            && sub_commands.len() > max_chain_length
-        {
+        // Chain length limit: deny overly complex compound commands
+        if max_chain_length > 0 && sub_commands.len() > max_chain_length {
             return HookResult::deny(format!(
                 "Command has {} chained sub-commands (limit: {}). Break into smaller commands.",
                 sub_commands.len(),
@@ -136,17 +130,14 @@ fn process_hook_input_with_rules_and_context(
             ));
         }
 
-        // Deny candidate check: inspect every sub-command before allow rules.
+        // Deny check: if ANY sub-command matches ANY deny rule, deny everything
         for sub_cmd in &sub_commands {
             // Structural cmd-sub guard for search commands. The grep/rg/find
             // allow rules no longer exclude on the NO_CMD_SUB regex (which is
             // not single-quote-aware and wrongly blocked quoted patterns like
             // `grep '`pat' file`). Real, unquoted command substitution inside a
             // grep/rg/find leaf is denied here instead.
-            if deny_mode == DenyMode::Enforce
-                && is_search_cmd(sub_cmd)
-                && decomposer::has_active_cmd_sub(sub_cmd)
-            {
+            if is_search_cmd(sub_cmd) && decomposer::has_active_cmd_sub(sub_cmd) {
                 return HookResult::deny(
                     "Command substitution (backtick or `$(...)`) in a grep/rg/find \
                          command is denied: it hides shell evaluation in a search. Single-quote \
@@ -156,9 +147,8 @@ fn process_hook_input_with_rules_and_context(
                 );
             }
             let synthetic = input.with_command(sub_cmd);
-            if deny_mode == DenyMode::Enforce
-                && let Some(reason) =
-                    check_rules_with_protected_branches(deny_rules, &synthetic, protected_branches)
+            if let Some(reason) =
+                check_rules_with_protected_branches(deny_rules, &synthetic, protected_branches)
             {
                 return HookResult::deny(reason);
             }
@@ -189,18 +179,15 @@ fn process_hook_input_with_rules_and_context(
 
     // Preserve the Claude profile's path checks for its file tools. Codex
     // calls use Bash, apply_patch, or MCP names and pass through this check.
-    if deny_mode == DenyMode::Enforce {
-        if let Some(reason) = path_check::check_path_exists(input) {
-            return HookResult::deny(reason);
-        }
+    if let Some(reason) = path_check::check_path_exists(input) {
+        return HookResult::deny(reason);
+    }
 
-        // Codex also exposes apply_patch and MCP calls to PreToolUse. Evaluate
-        // those calls directly without Bash decomposition.
-        if let Some(reason) =
-            check_rules_with_protected_branches(deny_rules, input, protected_branches)
-        {
-            return HookResult::deny(reason);
-        }
+    // Codex also exposes apply_patch and MCP calls to PreToolUse. Evaluate
+    // those calls directly without Bash decomposition.
+    if let Some(reason) = check_rules_with_protected_branches(deny_rules, input, protected_branches)
+    {
+        return HookResult::deny(reason);
     }
     if let Some(reason) =
         check_rules_with_protected_branches(allow_rules, input, protected_branches)
@@ -228,14 +215,7 @@ pub fn process_hook_input_with_rules(
     max_chain_length: usize,
     input: &HookInput,
 ) -> HookResult {
-    process_hook_input_with_rules_and_context(
-        deny_rules,
-        allow_rules,
-        max_chain_length,
-        DenyMode::Enforce,
-        input,
-        &[],
-    )
+    process_hook_input_with_rules_and_context(deny_rules, allow_rules, max_chain_length, input, &[])
 }
 
 /// Process a hook input against pre-compiled rules while preserving configured
@@ -253,26 +233,6 @@ pub fn process_hook_input_with_rules_and_protected_branches(
         deny_rules,
         allow_rules,
         max_chain_length,
-        DenyMode::Enforce,
-        input,
-        protected_branches,
-    )
-}
-
-/// Process pre-compiled rules with configured deny behavior and branch checks.
-pub fn process_hook_input_with_policy(
-    deny_rules: &[Rule],
-    allow_rules: &[Rule],
-    max_chain_length: usize,
-    deny_mode: DenyMode,
-    input: &HookInput,
-    protected_branches: &[String],
-) -> HookResult {
-    process_hook_input_with_rules_and_context(
-        deny_rules,
-        allow_rules,
-        max_chain_length,
-        deny_mode,
         input,
         protected_branches,
     )

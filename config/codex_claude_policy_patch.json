@@ -3,11 +3,6 @@
     "changed": [],
     "claude_only": [
       {
-        "command_exclude_regex": "${NO_CMD_SUB}|\\s+-m\\s+(pip|venv|ensurepip)\\b|\\s+-m\\s+json\\.tool\\s+\\S",
-        "command_regex": "^(python3?|/opt/homebrew/opt/python@3\\.12/bin/python3\\.12|PYTHONPATH=)\\s?",
-        "tool": "Bash"
-      },
-      {
         "file_path_exclude_regex": "${NO_TRAVERSAL}",
         "file_path_regex": "${PROJECT_PATH}",
         "tool": "Edit"
@@ -29,11 +24,6 @@
       }
     ],
     "codex_only": [
-      {
-        "command_exclude_regex": "${NO_CMD_SUB}|\\s+-m\\s+(pip|venv|ensurepip)\\b",
-        "command_regex": "^(python3?|/opt/homebrew/opt/python@3\\.12/bin/python3\\.12|PYTHONPATH=)\\s?",
-        "tool": "Bash"
-      },
       {
         "file_path_exclude_regex": "${NO_TRAVERSAL}",
         "file_path_regex": "${NSH_PATH}",
@@ -80,12 +70,12 @@
       {
         "claude": {
           "command_regex": ".*${GIT_INVOCATION}grep\\b",
-          "reason": "Use `git ls-files <pathspec>` to list candidate files, then use the Read tool on targeted files. `grep` and `rg` remain useful as pipeline filters on already-bounded command output (`git ls-files | grep pat`). For broad or structured content searches write a `_temp.py` helper that starts from a bounded candidate list (e.g. `git ls-files`) and run it with `source source_me.sh && python3 _temp.py`. `git grep` is denied to keep repo content search on the bounded workflow: list candidates first, then inspect targeted files. Scope-control rule, not anti-grep.",
+          "reason": "Use `rg --files -g '<glob>'` to list candidate files, then use the Read tool on targeted files. `grep` and `rg` remain useful as pipeline filters on already-bounded command output (`rg --files | grep pat`). For broad or structured searches write a `_temp.py` helper that starts from a bounded candidate list such as `rg --files` and run it with `source source_me.sh && python3 _temp.py`. This keeps repo content search bounded: list candidates first, then inspect targeted files. Scope-control rule, not anti-grep.",
           "tool": "Bash"
         },
         "codex": {
           "command_regex": ".*${GIT_INVOCATION}grep\\b",
-          "reason": "Use `git ls-files <pathspec>` to list candidates, then `rg -n <pattern> <relative-file>` to inspect targeted files. Use `rg -n '^' <relative-file>` when every line is needed. For broad or structured searches write a `_temp.py` helper that starts from a bounded candidate list and run it with `source source_me.sh && python3 _temp.py`. `git grep` is denied to keep repo content search bounded. Scope-control rule, not anti-grep.",
+          "reason": "Use `rg --files -g '<glob>'` to list candidates, then `rg -n <pattern> <relative-file>` to inspect targeted files. Use `rg -n '^' <relative-file>` when every line is needed. For broad or structured searches write a `_temp.py` helper that starts from a bounded candidate list and run it with `source source_me.sh && python3 _temp.py`. This keeps repo content search bounded. Scope-control rule, not anti-grep.",
           "tool": "Bash"
         },
         "identity": {
@@ -95,17 +85,65 @@
       },
       {
         "claude": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(bash|sh|zsh)\\s+-n\\b",
+          "reason": "For a literal command, use `echo '<command>'` to display it without execution. For a script file, inspect it with the Read tool. `bash`, `sh`, and `zsh -n` are rejected because invoking a shell is a more powerful operation than inspection.",
+          "tool": "Bash"
+        },
+        "codex": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(bash|sh|zsh)\\s+-n\\b",
+          "reason": "For a literal command, use `echo '<command>'` to display it without execution. For a script file, inspect it with `rg -n '^' <relative-script>`. `bash`, `sh`, and `zsh -n` are rejected because invoking a shell is a more powerful operation than inspection.",
+          "tool": "Bash"
+        },
+        "identity": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(bash|sh|zsh)\\s+-n\\b",
+          "tool": "Bash"
+        }
+      },
+      {
+        "claude": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(cat|head|tail)\\b[^>]*/",
+          "reason": "Invoke the Read tool: file_path=<path>, with optional offset and limit. For piped stdout, `... | head -5`, `... | tail -5`, and `... | cat` remain allowed. Direct file reads with `cat`, `head`, or `tail` are rejected because Read provides line numbers and bounded slicing.",
+          "tool": "Bash"
+        },
+        "codex": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(cat|head|tail)\\b[^>]*/",
+          "reason": "Use `rg -n '^' <relative-file>` for bounded text inspection, optionally piping its output to `head`, `tail`, or `sed -n`. For piped stdout, `... | head -5`, `... | tail -5`, and `... | cat` remain allowed. Direct file reads with `cat`, `head`, or `tail` are rejected.",
+          "tool": "Bash"
+        },
+        "identity": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(cat|head|tail)\\b[^>]*/",
+          "tool": "Bash"
+        }
+      },
+      {
+        "claude": {
           "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(pcregrep|ack|ag)\\b[^>]*/",
-          "reason": "Use `git ls-files <pathspec>` to identify candidate files, then use the Read tool on the relevant files. `pcregrep`, `ack`, and `ag` with a file path argument are rejected for the same scope-control reason as `grep`/`rg` with a file path; piped forms on bounded stdout stay allowed.",
+          "reason": "Use `rg --files -g '<glob>'` to identify candidate files, then use the Read tool on the relevant files. `pcregrep`, `ack`, and `ag` with a file path argument are rejected for the same scope-control reason as `grep`/`rg` with a file path; piped forms on bounded stdout stay allowed.",
           "tool": "Bash"
         },
         "codex": {
           "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(pcregrep|ack|ag)\\b[^>]*/",
-          "reason": "Use `git ls-files <pathspec>` to identify candidates, then `rg -n <pattern> <relative-file>` on the relevant files. `pcregrep`, `ack`, and `ag` with a file path argument are rejected for the same scope-control reason as `grep`/`rg` with a file path; piped forms on bounded stdout stay allowed.",
+          "reason": "Use `rg --files -g '<glob>'` to identify candidates, then `rg -n <pattern> <relative-file>` on the relevant files. `pcregrep`, `ack`, and `ag` with a file path argument are rejected for the same scope-control reason as `grep`/`rg` with a file path; piped forms on bounded stdout stay allowed.",
           "tool": "Bash"
         },
         "identity": {
           "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(pcregrep|ack|ag)\\b[^>]*/",
+          "tool": "Bash"
+        }
+      },
+      {
+        "claude": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}less\\b[^>]*/",
+          "reason": "Invoke the Read tool: file_path=<path>, with optional offset and limit. `less <file>` is rejected because Read provides line numbers and bounded slicing; the pipeline form `... | less` is not auto-allowed.",
+          "tool": "Bash"
+        },
+        "codex": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}less\\b[^>]*/",
+          "reason": "Use `rg -n '^' <relative-file>` for bounded text inspection. `less <file>` is rejected as an unbounded file reader; the pipeline form `... | less` is not auto-allowed.",
+          "tool": "Bash"
+        },
+        "identity": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}less\\b[^>]*/",
           "tool": "Bash"
         }
       },
@@ -127,13 +165,29 @@
       },
       {
         "claude": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b[^>]*/",
+          "reason": "Invoke the Read tool: file_path=<path>, offset=<start>, limit=<count> to extract a line range from a file. For piped stdout, `... | sed -n '10,20p'` remains allowed. `sed -n` against a file path is rejected because Read does file-range extraction directly.",
+          "tool": "Bash"
+        },
+        "codex": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b[^>]*/",
+          "reason": "Use `rg -n '^' <relative-file> | sed -n '<start>,<end>p'` so file access remains explicit and bounded. `sed -n` on piped stdout remains allowed; `sed -n` reading a file directly is rejected.",
+          "tool": "Bash"
+        },
+        "identity": {
+          "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b[^>]*/",
+          "tool": "Bash"
+        }
+      },
+      {
+        "claude": {
           "command_regex": "^\\s*(Grep|Read|Glob|Edit|Write|Task|WebFetch|WebSearch)\\b",
-          "reason": "Invoke the actual tool, not its name typed into Bash. `Read` reads a file; `Edit`/`Write` modify files; `Task`/`WebFetch`/`WebSearch` are first-class tool calls. For file search use `git ls-files <pathspec>` plus the Read tool. Typing `Grep`, `Glob`, `Read`, `Edit`, `Write`, `Task`, `WebFetch`, or `WebSearch` into Bash runs whatever (if anything) is on PATH by that name, not the Claude Code tool.",
+          "reason": "Invoke the actual tool, not its name typed into Bash. `Read` reads a file; `Edit`/`Write` modify files; `Task`/`WebFetch`/`WebSearch` are first-class tool calls. For file search use `rg --files -g '<glob>'`, then use the Read tool on targeted files. Typing `Grep`, `Glob`, `Read`, `Edit`, `Write`, `Task`, `WebFetch`, or `WebSearch` into Bash runs whatever (if anything) is on PATH by that name, not the Claude Code tool.",
           "tool": "Bash"
         },
         "codex": {
           "command_regex": "^\\s*(Grep|Read|Glob|Edit|Write|Task|WebFetch|WebSearch)\\b",
-          "reason": "Tool labels are not shell commands. Use the tools exposed in the current session. For bounded text inspection, use `git ls-files <pathspec>` to find candidates and `rg -n <pattern> <relative-file>` or `rg -n '^' <relative-file>` to read them. Typing `Grep`, `Glob`, `Read`, `Edit`, `Write`, `Task`, `WebFetch`, or `WebSearch` into Bash runs whatever (if anything) is on PATH by that name.",
+          "reason": "Tool labels are not shell commands. Use the tools exposed in the current session. For bounded text inspection, use `rg --files -g '<glob>'` to find candidates and `rg -n <pattern> <relative-file>` or `rg -n '^' <relative-file>` to read them. Typing `Grep`, `Glob`, `Read`, `Edit`, `Write`, `Task`, `WebFetch`, or `WebSearch` into Bash runs whatever (if anything) is on PATH by that name.",
           "tool": "Bash"
         },
         "identity": {
@@ -190,33 +244,7 @@
         }
       }
     ],
-    "claude_only": [
-      {
-        "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(awk|gawk|mawk)\\b",
-        "reason": "For line-matching in files, use `git ls-files <pathspec>` to identify candidates and use the Read tool on targeted files. Piped `grep` or `rg` on already-bounded stdout stays allowed (`<allowed cmd> | grep pat`, `<allowed cmd> | rg pat`). For field extraction from piped output use `cut`. For structured parsing write a `_temp.py` helper that starts from a bounded candidate list such as `git ls-files`, then run it with `source source_me.sh && python3 _temp.py`. `awk`/`gawk`/`mawk` is denied including pipeline leaves -- no pipe exception.",
-        "tool": "Bash"
-      },
-      {
-        "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(bash|sh|zsh)\\s+-n\\b",
-        "reason": "Inspect the script with the Read tool. To execute, use `bash script.sh` or ask for user approval. `bash`/`sh`/`zsh -n` syntax-check is rejected; the shell is not the right tool for script analysis.",
-        "tool": "Bash"
-      },
-      {
-        "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}(cat|head|tail)\\b[^>]*/",
-        "reason": "Invoke the Read tool: file_path=<path>, with optional offset and limit. For piped stdout, `... | head -5`, `... | tail -5`, `... | cat` are still allowed. `cat`/`head`/`tail` against a file path is rejected because Read provides line numbers and bounded slicing.",
-        "tool": "Bash"
-      },
-      {
-        "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}less\\b[^>]*/",
-        "reason": "Invoke the Read tool: file_path=<path>, with optional offset and limit. `less <file>` is rejected because Read provides line numbers and bounded slicing; the pipeline form `... | less` is not the same shape and is not auto-allowed either.",
-        "tool": "Bash"
-      },
-      {
-        "command_regex": "^${TOOL_PREFIX}${TOOL_PATH}sed\\s+-n\\b[^>]*/",
-        "reason": "Invoke the Read tool: file_path=<path>, offset=<start>, limit=<count> to extract a line range from a file. For piped stdout, `... | sed -n '10,20p'` is still allowed. `sed -n` against a file path is rejected because Read does file-range extraction directly.",
-        "tool": "Bash"
-      }
-    ],
+    "claude_only": [],
     "codex_only": [
       {
         "command_regex": "(?m)^\\*\\*\\* (Add|Update|Delete) File: (?:.*/)?\\.(env|secret)([[:space:]]|$)",
@@ -298,9 +326,6 @@
       },
       "limits": {
         "max_chain_length": 5
-      },
-      "policy": {
-        "deny_mode": "disabled"
       },
       "variables": {
         "BUILD_OUT": "\\.build/|target/(?:debug|release)/",

@@ -52,7 +52,7 @@ fn test_validate_test_config() {
 }
 
 #[test]
-fn test_codex_apply_patch_secret_file_passthrough_when_denies_disabled() {
+fn test_codex_apply_patch_secret_file_denied() {
     let input = HookInput {
         session_id: "test".to_string(),
         transcript_path: String::new(),
@@ -65,11 +65,11 @@ fn test_codex_apply_patch_secret_file_passthrough_when_denies_disabled() {
     };
     let result = process_hook_input(&codex_config_path(), &input)
         .expect("Codex apply_patch processing should succeed");
-    assert_eq!(result.decision, Decision::Passthrough);
+    assert_eq!(result.decision, Decision::Deny);
 }
 
 #[test]
-fn test_codex_apply_patch_nested_secret_file_passthrough_when_denies_disabled() {
+fn test_codex_apply_patch_nested_secret_file_denied() {
     let input = HookInput {
         session_id: "test".to_string(),
         transcript_path: String::new(),
@@ -82,7 +82,7 @@ fn test_codex_apply_patch_nested_secret_file_passthrough_when_denies_disabled() 
     };
     let result = process_hook_input(&codex_config_path(), &input)
         .expect("Codex apply_patch processing should succeed");
-    assert_eq!(result.decision, Decision::Passthrough);
+    assert_eq!(result.decision, Decision::Deny);
 }
 
 #[test]

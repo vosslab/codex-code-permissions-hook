@@ -19,14 +19,15 @@ The hook returns one of three outcomes:
 
 | Policy result | Codex behavior |
 | --- | --- |
-| Deny | Emits a denial only when the selected profile enforces deny rules. |
+| Deny | Emits a denial with a positive recovery reason. |
 | Allow | Emits no output, preserving Codex's normal permission flow. |
 | Passthrough | Emits no output, preserving Codex's normal permission flow. |
 
-The active Codex profile uses `deny_mode = "disabled"`, so deny rules do not
-participate in classification. A compound Bash command is decomposed into
-simple commands; every component must match an allow rule for the entire call
-to be classified as allow. Other calls pass through.
+The active Codex profile evaluates deny rules before allow rules. A compound
+Bash command is decomposed into simple commands; any denied component rejects
+the entire call, and every component must match an allow rule for the entire
+call to be classified as allow. Passthrough is the last-ditch result for a call
+that the policy cannot yet justify allowing or denying.
 
 ## Build
 
@@ -95,11 +96,11 @@ Validate the policy and exercise a realistic Codex input directly:
 target/release/codex-code-permissions-hook validate \
   --config codex-code-permissions-hook.toml
 
-printf '%s' '{"session_id":"test","transcript_path":null,"cwd":"/tmp","hook_event_name":"PreToolUse","turn_id":"turn","tool_name":"Bash","tool_use_id":"tool","tool_input":{"command":"rm -rf /tmp/example"},"model":"gpt-5","permission_mode":"default"}' \
+printf '%s' '{"session_id":"test","transcript_path":null,"cwd":"/tmp","hook_event_name":"PreToolUse","turn_id":"turn","tool_name":"Bash","tool_use_id":"tool","tool_input":{"command":"bash -n script.sh"},"model":"gpt-5","permission_mode":"default"}' \
   | target/release/codex-code-permissions-hook run \
       --config codex-code-permissions-hook.toml
 ```
 
-The second command should exit successfully without standard output and write
-an audit record with decision `passthrough`. A command matching no allow rule
-also exits successfully without standard output.
+The second command should emit a denial reason and write an audit record with
+decision `deny`. A command matching no allow or deny rule exits successfully
+without standard output and remains available for normal user approval.

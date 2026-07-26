@@ -12,9 +12,6 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub audit: AuditConfig,
-    /// Controls whether deny rules participate in policy decisions.
-    #[serde(default)]
-    pub policy: PolicyConfig,
     /// Optional limits for command complexity.
     #[serde(default)]
     pub limits: LimitsConfig,
@@ -31,30 +28,11 @@ pub struct Config {
     pub deny: Vec<RuleConfig>,
 }
 
-/// Runtime behavior for deny rules.
-#[derive(Debug, Deserialize, Clone, Default)]
-pub struct PolicyConfig {
-    /// Enforce or disable deny rules.
-    #[serde(default)]
-    pub deny_mode: DenyMode,
-}
-
-/// Controls whether deny rules produce hook denials.
-#[derive(Debug, Deserialize, Default, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum DenyMode {
-    /// Return deny decisions when a deny rule or limit matches.
-    #[default]
-    Enforce,
-    /// Ignore deny rules while evaluating allow and passthrough decisions.
-    Disabled,
-}
-
-/// Limits on command complexity for profiles that enforce deny rules.
+/// Limits on command complexity. Commands exceeding these are denied.
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct LimitsConfig {
     /// Maximum number of chained sub-commands in a single Bash invocation.
-    /// Enforcing profiles deny commands with more leaf sub-commands than this.
+    /// Commands with more leaf sub-commands than this are denied.
     /// Set to 0 to disable the limit (default).
     #[serde(default)]
     pub max_chain_length: usize,
