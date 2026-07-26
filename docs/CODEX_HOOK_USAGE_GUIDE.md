@@ -1,8 +1,8 @@
 # Codex Hook Usage Guide
 
-This project provides an experimental `PreToolUse` policy hook for Codex. It
-logs intercepted Bash commands, `apply_patch` calls, and supported MCP calls
-while classifying them against corpus-backed allow rules.
+This project provides a Rust `PreToolUse` policy hook for Codex. It classifies
+intercepted Bash commands, `apply_patch` calls, and supported MCP calls as
+allow, deny, or passthrough while writing bounded audit records.
 
 The checked-in [Codex hook reference](codex-hook-guide.md) is the source for
 the lifecycle protocol used by this implementation. The current online version
@@ -44,6 +44,8 @@ The repository keeps two full policy files with the same TOML structure:
 
 - [codex-code-permissions-hook.toml](../codex-code-permissions-hook.toml) uses
   Codex tool names and lifecycle behavior.
+- [example.toml](../example.toml) retains the Claude-compatible tool profile
+  used to review the intentional semantic differences between the policies.
 
 The policy is intentionally separate from Codex's hook registration. It holds
 the command matchers, audit paths, command-chain limit, and protected Git branch
@@ -89,6 +91,17 @@ Long strings in audit entries are truncated. Audit write failures are logged as
 warnings and do not crash Codex.
 
 ## Verification
+
+Run the full policy gate after changing either policy or the decision corpus:
+
+```bash
+./config_test.sh
+```
+
+This builds the release binary, runs the Rust tests, validates the active Codex
+policy, checks the reviewed Codex/Claude semantic difference, and executes every
+case in [command_decisions.tsv](../tests/command_decisions.tsv). Any policy and
+fixture disagreement makes the command fail.
 
 Validate the policy and exercise a realistic Codex input directly:
 

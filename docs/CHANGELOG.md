@@ -6,12 +6,15 @@
 
 - Reclassified 565 stale command-decision fixtures after deny enforcement was
   restored: 88 `allow` rows and 477 `passthrough` rows now expect `deny`.
+- Updated the Codex hook guide to describe enforced three-outcome
+  classification, list both policy profiles, and document `./config_test.sh` as
+  the policy/corpus agreement gate.
 
 ### Developer Tests and Notes
 
 - `./config_test.sh` passes all 119 Rust tests, validates the active policy and
   reviewed semantic difference, and passes all 1,265 command-decision cases.
-- `source source_me.sh && python3 -m pytest tests/` passes all 551 Python tests.
+- `source source_me.sh && python3 -m pytest tests/` passes all 550 Python tests.
 
 ## 2026-07-24
 
