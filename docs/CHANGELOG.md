@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-26
+
+### Fixes and Maintenance
+
+- Reclassified 565 stale command-decision fixtures after deny enforcement was
+  restored: 88 `allow` rows and 477 `passthrough` rows now expect `deny`.
+
+### Developer Tests and Notes
+
+- `./config_test.sh` passes all 119 Rust tests, validates the active policy and
+  reviewed semantic difference, and passes all 1,265 command-decision cases.
+- `source source_me.sh && python3 -m pytest tests/` passes all 551 Python tests.
+
 ## 2026-07-24
 
 ### Additions and New Features
